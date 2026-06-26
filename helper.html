@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SF-270 Payment Request Builder · v1.1.1</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <!-- pdf-lib for in-browser PDF filling -->
+  <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { height: 100%; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: #F0F4F8; }
+    input::-webkit-outer-spin-button,
+    input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type=number] { -moz-appearance: textfield; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #C5D5E8; border-radius: 3px; }
+    .nav-btn:hover { background: rgba(255,255,255,0.08) !important; }
+    .toggle-btn:hover { border-color: #4A6FA5 !important; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useMemo } = React;
+
+const VERSION = "1.1.1";
+// UPDATE THIS to match your exact PDF filename in GitHub
+const PDF_URL = "SF270_fillable-Copy.pdf";
+
+const C = {
+  navy:    "#1B2A4A", slate:   "#2E4166", mid:     "#4A6FA5",
+  sky:     "#7BA3D0", light:   "#D6E4F0", pale:    "#EEF4FA",
+  white:   "#FFFFFF", ink:     "#1A1F2E", muted:   "#6B7897",
+  border:  "#C5D5E8", advance: "#2563EB", reimb:   "#059669",
+  combo:   "#7C3AED", warn:    "#D97706", green:   "#059669",
+  red:     "#DC2626", bg:      "#F0F4F8",
+};
+
+// ── Logic ────────────────────────────────────────────────────────────────────
+function getPaymentType(start, end, asOf) {
+  if (!start || !end || !asOf) return null;
+  const s = new Date(start), e = new Date(end), a = new Date(asOf);
+  if (a < s) return "ADVANCE";
+  if (a > e) return "REIMBURSEMENT";
+  return "COMBO";
+}
+
+function calc11(f) {
+  const n = v => parseFloat(v) || 0;
+  const a = n(f.allOutlays), b = n(f.programIncome),
+        c = a - b,           d = n(f.advanceAmount),
+        e = c + d,           ff = n(f.nonFedShare),
+        g = e - ff,          h = n(f.pastAmount);
+  return { a, b, c, d, e, f: ff, g, h, reimb: g - h, total: g - h };
+}
+
+function calc12(f) {
+  const a = parseFloat(f.adv12a) || 0, b = parseFloat(f.bal12b) || 0;
+  return { a, b, c: a - b };
+}
+
+const fmt  = n => (isNaN(n) || n === undefined) ? "$—"
+  : "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtD = d => d
+  ? new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+  : "—";
+
+// ── PDF filling (in-browser via pdf-lib) ─────────────────────────────────────
+async function fillAndDownloadPDF(fields) {
+  // Fetch the blank fillable PDF from same GitHub repo
+  const pdfBytes = await fetch(PDF_URL).then(r => {
+    if (!r.ok) throw new Error(`Could not load PDF: ${r.status}`);
+    return r.arrayBuffer();
+  });
+
+  const { PDFDocument } = PDFLib;
+  const pdfDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  const form   = pdfDoc.getForm();
+
+  // Helper: safely set a text field
+  function setText(name, value) {
+    try {
+      const field = form.getTextField(name);
+      field.setText(value || "");
+    } catch(e) { /* field may not exist — skip silently */ }
+  }
+
+  // Helper: safely check/uncheck a checkbox
+  function setCheck(name, checked) {
+    try {
+      const field = form.getCheckBox(name);
+      checked ? field.check() : field.uncheck();
+    } catch(e) { /* skip */ }
+  }
+
+  // ── Checkboxes ──
+  setCheck("advance_cb",        fields.advance_cb);
+  setCheck("reimbursement_cb",  fields.reimbursement_cb);
+  setCheck("final_cb",          fields.final_cb);
+  setCheck("partial_cb",        fields.partial_cb);
+  setCheck("cash_cb",           fields.cash_cb);
+  setCheck("accrual_cb",        fields.accrual_cb);
+
+  // ── Page 1 text fields ──
+  setText("fed_sponsoring_agency",   fields.fed_sponsoring_agency);
+  setText("fed_grant_number",        fields.fed_grant_number);
+  setText("partial_payment_req_num", fields.partial_payment_req_num);
+  setText("employer_id_number",      fields.employer_id_number);
+  setText("financial_assistance_id", fields.financial_assistance_id);
+  setText("period_from",             fields.period_from);
+  setText("period_to",               fields.period_to);
+  setText("recip_name",              fields.recip_name);
+  setText("recip_street1",           fields.recip_street1);
+  setText("recip_street2",           fields.recip_street2);
+  setText("recip_city",              fields.recip_city);
+  setText("recip_county",            fields.recip_county);
+  setText("recip_state",             fields.recip_state);
+  setText("recip_province",          fields.recip_province);
+  setText("recip_country",           fields.recip_country);
+  setText("recip_zip",               fields.recip_zip);
+  setText("payee_name",              fields.payee_name);
+  setText("payee_street1",           fields.payee_street1);
+  setText("payee_street2",           fields.payee_street2);
+  setText("payee_city",              fields.payee_city);
+  setText("payee_county",            fields.payee_county);
+  setText("payee_state",             fields.payee_state);
+  setText("payee_province",          fields.payee_province);
+  setText("payee_country",           fields.payee_country);
+  setText("payee_zip",               fields.payee_zip);
+
+  // ── Page 2 — Box 11 ──
+  setText("asof_date", fields.asof_date);
+  setText("row_a_1",   fields.row_a_1);  setText("row_a_T", fields.row_a_T);
+  setText("row_b_1",   fields.row_b_1);  setText("row_b_T", fields.row_b_T);
+  setText("row_c_1",   fields.row_c_1);  setText("row_c_T", fields.row_c_T);
+  setText("row_d_1",   fields.row_d_1);  setText("row_d_T", fields.row_d_T);
+  setText("row_e_1",   fields.row_e_1);  setText("row_e_T", fields.row_e_T);
+  setText("row_f_1",   fields.row_f_1);  setText("row_f_T", fields.row_f_T);
+  setText("row_g_1",   fields.row_g_1);  setText("row_g_T", fields.row_g_T);
+  setText("row_h_1",   fields.row_h_1);  setText("row_h_T", fields.row_h_T);
+  setText("row_i_1",   fields.row_i_1);  setText("row_i_T", fields.row_i_T);
+
+  // ── Box 12 ──
+  setText("alt_12a", fields.alt_12a);
+  setText("alt_12b", fields.alt_12b);
+  setText("alt_12c", fields.alt_12c);
+
+  // ── Certification ──
+  setText("prefix",         fields.prefix);
+  setText("first_name",     fields.first_name);
+  setText("middle_name",    fields.middle_name);
+  setText("last_name",      fields.last_name);
+  setText("suffix",         fields.suffix);
+  setText("title",          fields.title);
+  setText("telephone",      fields.telephone);
+  setText("date_submitted", fields.date_submitted);
+  setText("signature",      fields.signature);
+
+  // Flatten form so values are baked in (optional — remove if you want fields editable after)
+  // NOTE: do NOT flatten — keeping fields live so the validator can read them directly
+
+  const filledBytes = await pdfDoc.save();
+  const blob = new Blob([filledBytes], { type: "application/pdf" });
+  const url  = URL.createObjectURL(blob);
+
+  // Trigger download
+  const a = document.createElement("a");
+  a.href     = url;
+  a.download = `SF270_filled_${new Date().toISOString().slice(0,10)}.pdf`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+// ── Atoms ────────────────────────────────────────────────────────────────────
+function Field({ label, sub, children, box }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+        <label style={{ fontSize: 12, fontWeight: 600, color: C.ink }}>
+          {label}
+          {sub && <span style={{ fontWeight: 400, color: C.muted, marginLeft: 5 }}>{sub}</span>}
+        </label>
+        {box && <span style={{ fontSize: 10, color: C.mid, fontFamily: "ui-monospace,monospace", fontWeight: 700 }}>{box}</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function TF({ value, onChange, type = "text", placeholder }) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <input type={type} value={value} placeholder={placeholder}
+      onChange={e => onChange(e.target.value)}
+      onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+      style={{
+        width: "100%", padding: "8px 11px", fontSize: 13, color: C.ink,
+        fontFamily: "inherit", border: `1.5px solid ${focused ? C.mid : C.border}`,
+        borderRadius: 6, background: C.white, outline: "none", transition: "border-color .15s",
+      }}
+    />
+  );
+}
+
+function MoneyField({ value, onChange, computed }) {
+  const [focused, setFocused] = useState(false);
+  if (computed !== undefined) {
+    return (
+      <div style={{
+        padding: "8px 11px", fontSize: 13, fontWeight: 700, color: C.slate,
+        border: `1.5px solid ${C.border}`, borderRadius: 6, background: C.pale,
+        fontFamily: "ui-monospace,monospace",
+      }}>{fmt(computed)}</div>
+    );
+  }
+  return (
+    <div style={{ position: "relative" }}>
+      <span style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", color: C.muted, fontSize: 13, pointerEvents: "none" }}>$</span>
+      <input type="number" step="0.01" min="0" value={value} placeholder="0.00"
+        onChange={e => onChange(e.target.value)}
+        onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+        style={{
+          width: "100%", paddingLeft: 22, paddingRight: 11, paddingTop: 8, paddingBottom: 8,
+          fontSize: 13, color: C.ink, fontFamily: "ui-monospace,monospace",
+          border: `1.5px solid ${focused ? C.mid : C.border}`,
+          borderRadius: 6, background: C.white, outline: "none", transition: "border-color .15s",
+        }}
+      />
+    </div>
+  );
+}
+
+function Toggle({ options, value, onChange }) {
+  return (
+    <div style={{ display: "flex", gap: 8 }}>
+      {options.map(o => (
+        <button key={o.value} className="toggle-btn"
+          onClick={() => onChange(value === o.value ? "" : o.value)}
+          style={{
+            flex: 1, padding: "8px 10px", borderRadius: 6, fontSize: 12, fontWeight: 600,
+            cursor: "pointer", transition: "all .15s",
+            border: `2px solid ${value === o.value ? C.mid : C.border}`,
+            background: value === o.value ? C.pale : C.white,
+            color: value === o.value ? C.slate : C.muted,
+          }}>{o.label}</button>
+      ))}
+    </div>
+  );
+}
+
+function CheckRow({ label, checked, onChange }) {
+  return (
+    <div onClick={() => onChange(!checked)}
+      style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", marginBottom: 8, userSelect: "none" }}>
+      <div style={{
+        width: 16, height: 16, borderRadius: 3, flexShrink: 0,
+        border: `2px solid ${checked ? C.mid : C.border}`,
+        background: checked ? C.mid : C.white,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        transition: "all .15s",
+      }}>
+        {checked && <span style={{ color: C.white, fontSize: 10, lineHeight: 1, fontWeight: 700 }}>✓</span>}
+      </div>
+      <span style={{ fontSize: 13, color: C.ink }}>{label}</span>
+    </div>
+  );
+}
+
+function Divider({ label }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "16px 0 14px" }}>
+      <div style={{ flex: 1, height: 1, background: C.border }} />
+      <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", color: C.muted, textTransform: "uppercase", whiteSpace: "nowrap" }}>{label}</span>
+      <div style={{ flex: 1, height: 1, background: C.border }} />
+    </div>
+  );
+}
+
+function SectionCard({ id, title, badge, children }) {
+  return (
+    <div id={id} style={{ background: C.white, borderRadius: 10, marginBottom: 16, overflow: "hidden", boxShadow: "0 2px 8px rgba(0,0,0,0.07)" }}>
+      <div style={{ padding: "13px 20px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", background: C.pale, flexWrap: "wrap", gap: 8 }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: C.navy }}>{title}</span>
+        {badge}
+      </div>
+      <div style={{ padding: "18px 20px" }}>{children}</div>
+    </div>
+  );
+}
+
+function Grid2({ children }) { return <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>{children}</div>; }
+function Grid3({ children }) { return <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>{children}</div>; }
+function Grid4({ children }) { return <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>{children}</div>; }
+
+function PaymentPill({ type }) {
+  if (!type) return <span style={{ fontSize: 11, color: C.muted }}>Enter dates to determine</span>;
+  const cfg = {
+    ADVANCE:       { color: C.advance, bg: "#EFF6FF", label: "Advance — Box 12 available" },
+    REIMBURSEMENT: { color: C.reimb,   bg: "#F0FDF4", label: "Reimbursement — Section 11" },
+    COMBO:         { color: C.combo,   bg: "#FAF5FF", label: "Advance + Reimbursement — Section 11" },
+  };
+  const { color, bg, label } = cfg[type];
+  return (
+    <span style={{ fontSize: 11, fontWeight: 700, color, background: bg, padding: "3px 10px", borderRadius: 20, border: `1px solid ${color}` }}>
+      {label}
+    </span>
+  );
+}
+
+function CalcRow({ label, box, value, bold, highlight }) {
+  return (
+    <div style={{
+      display: "flex", justifyContent: "space-between", alignItems: "center",
+      padding: "6px 10px", borderRadius: 6, marginBottom: 3,
+      background: highlight ? "#E8F0FA" : "transparent",
+    }}>
+      <div style={{ fontSize: 12 }}>
+        <span style={{ fontSize: 10, fontFamily: "ui-monospace,monospace", fontWeight: 700, color: C.mid, marginRight: 7 }}>{box}</span>
+        <span style={{ color: C.ink, fontWeight: bold ? 600 : 400 }}>{label}</span>
+      </div>
+      <span style={{ fontSize: 13, fontWeight: bold ? 800 : 600, color: highlight ? C.navy : C.slate, fontFamily: "ui-monospace,monospace" }}>
+        {fmt(value)}
+      </span>
+    </div>
+  );
+}
+
+const NAV = [
+  { id: "s-type",   label: "Type & Period",   box: "1–2, 8" },
+  { id: "s-org",    label: "Organization",    box: "3–7, 9–10" },
+  { id: "s-11",     label: "Section 11",      box: "11a–11i" },
+  { id: "s-12",     label: "Section 12",      box: "12a–12c" },
+  { id: "s-cert",   label: "Certification",   box: "13" },
+  { id: "s-export", label: "Review & Export", box: "" },
+];
+
+// ── App ───────────────────────────────────────────────────────────────────────
+function App() {
+  const [activeNav,    setActiveNav]    = useState("s-type");
+  const [exportStatus, setExportStatus] = useState("idle"); // idle | loading | done | error
+  const [exportMsg,    setExportMsg]    = useState("");
+  const [sidebarOpen,  setSidebarOpen]  = useState(true);
+
+  const [f, setF] = useState({
+    periodStart: "", periodEnd: "", asOfDate: "", dateSubmitted: "",
+    accountingBasis: "", paymentFinal: "",
+    box1aAdvance: false, box1aReimb: false,
+    agency: "", fain: "", partialNum: "", employerId: "", finAssistId: "",
+    recipName: "", street1: "", street2: "", city: "", county: "",
+    state: "", province: "", country: "", zip: "",
+    payeeName: "", payeeStreet1: "", payeeStreet2: "", payeeCity: "",
+    payeeCounty: "", payeeState: "", payeeProvince: "", payeeCountry: "", payeeZip: "",
+    allOutlays: "", programIncome: "", advanceAmount: "", nonFedShare: "", pastAmount: "",
+    adv12a: "", bal12b: "",
+    prefix: "", firstName: "", middleName: "", lastName: "", suffix: "",
+    title: "", phone: "", email: "",
+  });
+
+  const set     = key => val => setF(p => ({ ...p, [key]: val }));
+  const setBool = key => val => setF(p => ({ ...p, [key]: val }));
+
+  const pType = useMemo(() => getPaymentType(f.periodStart, f.periodEnd, f.asOfDate), [f.periodStart, f.periodEnd, f.asOfDate]);
+  const c11   = useMemo(() => calc11(f), [f]);
+  const c12   = useMemo(() => calc12(f), [f]);
+
+  const autoAdv  = pType === "ADVANCE"       || pType === "COMBO";
+  const autoReim = pType === "REIMBURSEMENT" || pType === "COMBO";
+
+  function scrollTo(id) {
+    setActiveNav(id);
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  async function doExport() {
+    setExportStatus("loading");
+    setExportMsg("Loading PDF template…");
+    try {
+      const fields = {
+        advance_cb: autoAdv,           reimbursement_cb: autoReim,
+        final_cb:   f.paymentFinal === "FINAL", partial_cb: f.paymentFinal === "PARTIAL",
+        cash_cb:    f.accountingBasis === "CASH", accrual_cb: f.accountingBasis === "ACCRUAL",
+        fed_sponsoring_agency:    f.agency,
+        fed_grant_number:         f.fain,
+        partial_payment_req_num:  f.partialNum,
+        employer_id_number:       f.employerId,
+        financial_assistance_id:  f.finAssistId,
+        period_from:  fmtD(f.periodStart),
+        period_to:    fmtD(f.periodEnd),
+        recip_name:     f.recipName,  recip_street1: f.street1,
+        recip_street2:  f.street2,    recip_city:    f.city,
+        recip_county:   f.county,     recip_state:   f.state,
+        recip_province: f.province,   recip_country: f.country,
+        recip_zip:      f.zip,
+        payee_name:     f.payeeName || f.recipName,
+        payee_street1:  f.payeeStreet1,  payee_street2:   f.payeeStreet2,
+        payee_city:     f.payeeCity,     payee_county:    f.payeeCounty,
+        payee_state:    f.payeeState,    payee_province:  f.payeeProvince,
+        payee_country:  f.payeeCountry,  payee_zip:       f.payeeZip,
+        asof_date: fmtD(f.asOfDate),
+        row_a_1: fmt(c11.a),  row_a_T: fmt(c11.a),
+        row_b_1: fmt(c11.b),  row_b_T: fmt(c11.b),
+        row_c_1: fmt(c11.c),  row_c_T: fmt(c11.c),
+        row_d_1: fmt(c11.d),  row_d_T: fmt(c11.d),
+        row_e_1: fmt(c11.e),  row_e_T: fmt(c11.e),
+        row_f_1: fmt(c11.f),  row_f_T: fmt(c11.f),
+        row_g_1: fmt(c11.g),  row_g_T: fmt(c11.g),
+        row_h_1: fmt(c11.h),  row_h_T: fmt(c11.h),
+        row_i_1: fmt(c11.total), row_i_T: fmt(c11.total),
+        alt_12a: fmt(c12.a), alt_12b: fmt(c12.b), alt_12c: fmt(c12.c),
+        prefix:       f.prefix,     first_name:  f.firstName,
+        middle_name:  f.middleName, last_name:   f.lastName,
+        suffix:       f.suffix,     title:       f.title,
+        telephone:    f.phone,      date_submitted: fmtD(f.dateSubmitted),
+        signature:    [f.firstName, f.lastName].filter(Boolean).join(" "),
+      };
+
+      setExportMsg("Filling form fields…");
+      await fillAndDownloadPDF(fields);
+      setExportStatus("done");
+      setExportMsg("PDF downloaded successfully!");
+    } catch(err) {
+      console.error(err);
+      setExportStatus("error");
+      setExportMsg("Error: " + err.message);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: C.bg }}>
+
+      {/* ── Sidebar ── */}
+      <div style={{
+        width: sidebarOpen ? 200 : 0, flexShrink: 0,
+        background: C.navy, overflowY: "auto", overflowX: "hidden",
+        transition: "width .2s",
+      }}>
+        <div style={{ width: 200, padding: "24px 0" }}>
+          <div style={{ padding: "0 16px 20px" }}>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", color: C.sky, textTransform: "uppercase", marginBottom: 4 }}>SF-270 · v{VERSION}</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: C.white, lineHeight: 1.3 }}>Payment Request</div>
+          </div>
+
+          {NAV.map(n => (
+            <button key={n.id} className="nav-btn" onClick={() => scrollTo(n.id)}
+              style={{
+                display: "block", width: "100%", textAlign: "left",
+                padding: "10px 16px", border: "none", cursor: "pointer",
+                background: activeNav === n.id ? "rgba(255,255,255,0.12)" : "transparent",
+                borderLeft: `3px solid ${activeNav === n.id ? C.sky : "transparent"}`,
+                transition: "all .15s",
+              }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: activeNav === n.id ? C.white : C.sky }}>{n.label}</div>
+              {n.box && <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", fontFamily: "ui-monospace,monospace", marginTop: 1 }}>Box {n.box}</div>}
+            </button>
+          ))}
+
+          {(c11.total !== 0 || c12.c !== 0) && (
+            <div style={{ margin: "20px 12px 0", padding: 12, background: "rgba(255,255,255,0.07)", borderRadius: 8 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", color: C.sky, textTransform: "uppercase", marginBottom: 8 }}>Live Totals</div>
+              {c11.total !== 0 && <>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginBottom: 2 }}>11i Requested</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: C.white, fontFamily: "ui-monospace,monospace", marginBottom: 8 }}>{fmt(c11.total)}</div>
+              </>}
+              {c12.c > 0 && <>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginBottom: 2 }}>12c Requested</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: C.white, fontFamily: "ui-monospace,monospace" }}>{fmt(c12.c)}</div>
+              </>}
+            </div>
+          )}
+
+          <div style={{ margin: "16px 12px 0", fontSize: 10, color: "rgba(255,255,255,0.2)", lineHeight: 1.5 }}>
+            OMB 4040-0012<br />Exp. 06/30/2028
+          </div>
+        </div>
+      </div>
+
+      {/* Sidebar toggle */}
+      <button onClick={() => setSidebarOpen(o => !o)}
+        style={{
+          position: "fixed", left: sidebarOpen ? 208 : 8, top: 16, zIndex: 100,
+          width: 28, height: 28, borderRadius: 6, background: C.navy,
+          border: "none", cursor: "pointer", color: C.sky, fontSize: 14,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          transition: "left .2s", boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+        }}>
+        {sidebarOpen ? "◀" : "▶"}
+      </button>
+
+      {/* ── Main scroll ── */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "24px 28px 40px" }}>
+        <div style={{ maxWidth: 820, margin: "0 auto" }}>
+
+          {/* TYPE & PERIOD */}
+          <SectionCard id="s-type" title="Payment Type & Period" badge={<PaymentPill type={pType} />}>
+            <Grid2>
+              <Field label="Period Start Date" box="Box 8"><TF type="date" value={f.periodStart} onChange={set("periodStart")} /></Field>
+              <Field label="Period End Date" box="Box 8"><TF type="date" value={f.periodEnd} onChange={set("periodEnd")} /></Field>
+            </Grid2>
+            <Grid2>
+              <Field label="Financial Data As-Of Date" sub="drives payment type logic" box="Box 11"><TF type="date" value={f.asOfDate} onChange={set("asOfDate")} /></Field>
+              <Field label="Date Request Submitted" box="Box 13"><TF type="date" value={f.dateSubmitted} onChange={set("dateSubmitted")} /></Field>
+            </Grid2>
+            {pType && (
+              <div style={{
+                padding: "10px 14px", borderRadius: 8, marginBottom: 14,
+                background: pType === "ADVANCE" ? "#EFF6FF" : pType === "REIMBURSEMENT" ? "#F0FDF4" : "#FAF5FF",
+                border: `1px solid ${pType === "ADVANCE" ? C.advance : pType === "REIMBURSEMENT" ? C.reimb : C.combo}`,
+                fontSize: 12, color: C.muted, lineHeight: 1.6,
+              }}>
+                {pType === "ADVANCE" && `As-of date (${fmtD(f.asOfDate)}) is BEFORE period start (${fmtD(f.periodStart)}) → Advance. You may use Section 11 or Section 12.`}
+                {pType === "REIMBURSEMENT" && `As-of date (${fmtD(f.asOfDate)}) is AFTER period end (${fmtD(f.periodEnd)}) → Reimbursement. Complete Section 11 only.`}
+                {pType === "COMBO" && `As-of date (${fmtD(f.asOfDate)}) falls within the period → Advance + Reimbursement. Complete Section 11 only.`}
+              </div>
+            )}
+            <Divider label="Box 1a — Payment type (auto-set from dates)" />
+            <Grid2>
+              <div>
+                <CheckRow label="Advance"       checked={autoAdv  || f.box1aAdvance} onChange={v => setBool("box1aAdvance")(v)} />
+                <CheckRow label="Reimbursement" checked={autoReim || f.box1aReimb}   onChange={v => setBool("box1aReimb")(v)} />
+              </div>
+              <Field label="Box 1b — This payment is">
+                <Toggle value={f.paymentFinal} onChange={set("paymentFinal")}
+                  options={[{ value: "FINAL", label: "Final" }, { value: "PARTIAL", label: "Partial" }]} />
+              </Field>
+            </Grid2>
+            <Divider label="Box 2 — Accounting system" />
+            <Toggle value={f.accountingBasis} onChange={set("accountingBasis")}
+              options={[{ value: "CASH", label: "Cash-Based" }, { value: "ACCRUAL", label: "Accrual-Based" }]} />
+          </SectionCard>
+
+          {/* ORGANIZATION */}
+          <SectionCard id="s-org" title="Organization & Award Information">
+            <Grid2>
+              <Field label="Federal Sponsoring Agency" box="Box 3"><TF value={f.agency} onChange={set("agency")} placeholder="e.g. HHS, DOJ" /></Field>
+              <Field label="Federal Award Identifier (FAIN)" box="Box 4"><TF value={f.fain} onChange={set("fain")} placeholder="e.g. 1H79SP123456" /></Field>
+            </Grid2>
+            <Grid3>
+              <Field label="Employer ID (EIN)" box="Box 6"><TF value={f.employerId} onChange={set("employerId")} placeholder="XX-XXXXXXX" /></Field>
+              <Field label="Financial Assistance ID" box="Box 7"><TF value={f.finAssistId} onChange={set("finAssistId")} /></Field>
+              <Field label="Payment Request #" box="Box 5"><TF value={f.partialNum} onChange={set("partialNum")} placeholder="e.g. 3" /></Field>
+            </Grid3>
+            <Divider label="Box 9 — Recipient Organization" />
+            <Field label="Organization Name"><TF value={f.recipName} onChange={set("recipName")} placeholder="Legal organization name" /></Field>
+            <Grid2>
+              <Field label="Street 1"><TF value={f.street1} onChange={set("street1")} /></Field>
+              <Field label="Street 2" sub="optional"><TF value={f.street2} onChange={set("street2")} /></Field>
+            </Grid2>
+            <Grid4>
+              <Field label="City"><TF value={f.city} onChange={set("city")} /></Field>
+              <Field label="State"><TF value={f.state} onChange={set("state")} /></Field>
+              <Field label="ZIP"><TF value={f.zip} onChange={set("zip")} /></Field>
+              <Field label="County" sub="opt"><TF value={f.county} onChange={set("county")} /></Field>
+            </Grid4>
+            <Grid2>
+              <Field label="Province" sub="optional"><TF value={f.province} onChange={set("province")} /></Field>
+              <Field label="Country" sub="if non-US"><TF value={f.country} onChange={set("country")} /></Field>
+            </Grid2>
+            <Divider label="Box 10 — Payee (if different from recipient)" />
+            <Field label="Payee Organization Name" sub="leave blank if same as above">
+              <TF value={f.payeeName} onChange={set("payeeName")} placeholder="Leave blank if same" />
+            </Field>
+            {f.payeeName && (
+              <div>
+                <Grid2>
+                  <Field label="Street 1"><TF value={f.payeeStreet1} onChange={set("payeeStreet1")} /></Field>
+                  <Field label="Street 2" sub="optional"><TF value={f.payeeStreet2} onChange={set("payeeStreet2")} /></Field>
+                </Grid2>
+                <Grid4>
+                  <Field label="City"><TF value={f.payeeCity} onChange={set("payeeCity")} /></Field>
+                  <Field label="State"><TF value={f.payeeState} onChange={set("payeeState")} /></Field>
+                  <Field label="ZIP"><TF value={f.payeeZip} onChange={set("payeeZip")} /></Field>
+                  <Field label="County" sub="opt"><TF value={f.payeeCounty} onChange={set("payeeCounty")} /></Field>
+                </Grid4>
+                <Grid2>
+                  <Field label="Province" sub="opt"><TF value={f.payeeProvince} onChange={set("payeeProvince")} /></Field>
+                  <Field label="Country" sub="if non-US"><TF value={f.payeeCountry} onChange={set("payeeCountry")} /></Field>
+                </Grid2>
+              </div>
+            )}
+          </SectionCard>
+
+          {/* SECTION 11 */}
+          <SectionCard id="s-11" title="Section 11 — Computation of Amount Requested"
+            badge={<span style={{ fontSize: 11, color: C.muted }}>Reimbursement & Combo · cannot be used with Section 12</span>}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+              <div>
+                <Field label="Total Program Outlays As Of" sub={fmtD(f.asOfDate)} box="11a"><MoneyField value={f.allOutlays} onChange={set("allOutlays")} /></Field>
+                <Field label="Less: Program Income" sub="$0 if none" box="11b"><MoneyField value={f.programIncome} onChange={set("programIncome")} /></Field>
+                <Field label="Advance Amount Needed" sub="advance period only" box="11d"><MoneyField value={f.advanceAmount} onChange={set("advanceAmount")} /></Field>
+                <Field label="Non-Federal Share (Cost Share)" box="11f"><MoneyField value={f.nonFedShare} onChange={set("nonFedShare")} /></Field>
+                <Field label="Federal Payments Previously Received" box="11h"><MoneyField value={f.pastAmount} onChange={set("pastAmount")} /></Field>
+              </div>
+              <div style={{ background: C.pale, borderRadius: 8, padding: 14, border: `1px solid ${C.border}` }}>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.07em", color: C.mid, textTransform: "uppercase", marginBottom: 12 }}>Auto-Calculated</div>
+                <CalcRow label="Total Outlays"       box="11a" value={c11.a} />
+                <CalcRow label="Program Income"      box="11b" value={c11.b} />
+                <CalcRow label="Net Outlays (a−b)"   box="11c" value={c11.c} />
+                <CalcRow label="Advance Amount"      box="11d" value={c11.d} />
+                <CalcRow label="Total (c+d)"         box="11e" value={c11.e} />
+                <CalcRow label="Non-Fed Share"       box="11f" value={c11.f} />
+                <CalcRow label="Federal Share (e−f)" box="11g" value={c11.g} />
+                <CalcRow label="Previously Received" box="11h" value={c11.h} />
+                <div style={{ borderTop: `1.5px solid ${C.border}`, marginTop: 8, paddingTop: 8 }}>
+                  <CalcRow label="Federal Share Requested" box="11i" value={c11.total} bold highlight />
+                </div>
+              </div>
+            </div>
+          </SectionCard>
+
+          {/* SECTION 12 */}
+          <SectionCard id="s-12" title="Section 12 — Alternate Computation (Advance Only)"
+            badge={
+              <span style={{
+                fontSize: 11, fontWeight: 700,
+                color: pType === "ADVANCE" ? C.advance : C.muted,
+                background: pType === "ADVANCE" ? "#EFF6FF" : C.pale,
+                padding: "2px 9px", borderRadius: 12,
+                border: `1px solid ${pType === "ADVANCE" ? C.advance : C.border}`,
+              }}>
+                {pType === "ADVANCE" ? "Available" : "Advance requests only"}
+              </span>
+            }>
+            <div style={{ padding: "10px 14px", background: "#FFF9E6", borderRadius: 7, border: `1px solid ${C.warn}`, fontSize: 12, color: "#92400E", marginBottom: 16, lineHeight: 1.6 }}>
+              Complete Section 12 <strong>or</strong> Section 11 — never both. Section 12 is only valid for pure Advance requests.
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+              <div>
+                <Field label="Estimated Federal Cash Outlays" sub="for advance period" box="12a"><MoneyField value={f.adv12a} onChange={set("adv12a")} /></Field>
+                <Field label="Estimated Federal Cash Balance on Hand" sub="at start of advance period" box="12b"><MoneyField value={f.bal12b} onChange={set("bal12b")} /></Field>
+              </div>
+              <div style={{ background: C.pale, borderRadius: 8, padding: 14, border: `1px solid ${C.border}` }}>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.07em", color: C.mid, textTransform: "uppercase", marginBottom: 12 }}>Auto-Calculated</div>
+                <CalcRow label="Estimated Outlays"  box="12a" value={c12.a} />
+                <CalcRow label="Balance on Hand"    box="12b" value={c12.b} />
+                <div style={{ borderTop: `1.5px solid ${C.border}`, marginTop: 8, paddingTop: 8 }}>
+                  <CalcRow label="Amount Requested (a−b)" box="12c" value={c12.c} bold highlight />
+                </div>
+              </div>
+            </div>
+          </SectionCard>
+
+          {/* CERTIFICATION */}
+          <SectionCard id="s-cert" title="Section 13 — Certification">
+            <Grid4>
+              <Field label="Prefix" sub="opt"><TF value={f.prefix} onChange={set("prefix")} placeholder="Dr." /></Field>
+              <div style={{ gridColumn: "span 2" }}><Field label="First Name"><TF value={f.firstName} onChange={set("firstName")} /></Field></div>
+              <Field label="Middle" sub="opt"><TF value={f.middleName} onChange={set("middleName")} /></Field>
+            </Grid4>
+            <Grid3>
+              <div style={{ gridColumn: "span 2" }}><Field label="Last Name"><TF value={f.lastName} onChange={set("lastName")} /></Field></div>
+              <Field label="Suffix" sub="opt"><TF value={f.suffix} onChange={set("suffix")} placeholder="Jr." /></Field>
+            </Grid3>
+            <Grid2>
+              <Field label="Title"><TF value={f.title} onChange={set("title")} placeholder="Grants Manager" /></Field>
+              <Field label="Phone"><TF type="tel" value={f.phone} onChange={set("phone")} placeholder="(555) 000-0000" /></Field>
+            </Grid2>
+            <Field label="Email" sub="for records only — not a form field">
+              <TF type="email" value={f.email} onChange={set("email")} placeholder="name@org.gov" />
+            </Field>
+            <div style={{ padding: "10px 14px", background: "#FFFBEB", borderRadius: 7, border: `1px solid ${C.warn}`, fontSize: 12, color: "#92400E", lineHeight: 1.6, marginTop: 4 }}>
+              By exporting this form, the certifying official confirms that all data is correct, all outlays were made per grant conditions, and payment has not been previously requested.
+            </div>
+          </SectionCard>
+
+          {/* REVIEW & EXPORT */}
+          <SectionCard id="s-export" title="Review & Export">
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.07em", color: C.mid, textTransform: "uppercase", marginBottom: 10 }}>Request Summary</div>
+                {[
+                  ["Box 1a", "Type",       pType === "COMBO" ? "Advance + Reimbursement" : pType || "—"],
+                  ["Box 1b", "Final/Part", f.paymentFinal || "—"],
+                  ["Box 2",  "Accounting", f.accountingBasis ? f.accountingBasis + "-BASED" : "—"],
+                  ["Box 3",  "Agency",     f.agency || "—"],
+                  ["Box 4",  "FAIN",       f.fain || "—"],
+                  ["Box 8",  "Period",     f.periodStart ? `${fmtD(f.periodStart)} → ${fmtD(f.periodEnd)}` : "—"],
+                  ["Box 9",  "Recipient",  f.recipName || "—"],
+                  ["Box 13", "Certifier",  [f.firstName, f.lastName].filter(Boolean).join(" ") || "—"],
+                ].map(([box, label, val]) => (
+                  <div key={box} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: `1px solid ${C.pale}`, fontSize: 12 }}>
+                    <div>
+                      <span style={{ fontFamily: "ui-monospace,monospace", fontSize: 10, fontWeight: 700, color: C.mid, marginRight: 6 }}>{box}</span>
+                      <span style={{ color: C.muted }}>{label}</span>
+                    </div>
+                    <span style={{ fontWeight: 600, color: C.ink, maxWidth: "55%", textAlign: "right", wordBreak: "break-word" }}>{val}</span>
+                  </div>
+                ))}
+              </div>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.07em", color: C.mid, textTransform: "uppercase", marginBottom: 10 }}>Financial Summary</div>
+                <div style={{ background: C.pale, borderRadius: 8, padding: 14, border: `1px solid ${C.border}` }}>
+                  <CalcRow label="Total Outlays"       box="11a" value={c11.a} />
+                  <CalcRow label="Net Outlays"         box="11c" value={c11.c} />
+                  <CalcRow label="Federal Share"       box="11g" value={c11.g} />
+                  <CalcRow label="Previously Received" box="11h" value={c11.h} />
+                  <div style={{ borderTop: `1.5px solid ${C.border}`, marginTop: 8, paddingTop: 8 }}>
+                    <CalcRow label="Sec. 11 Requested" box="11i" value={c11.total} bold highlight />
+                  </div>
+                  {c12.c > 0 && (
+                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.border}` }}>
+                      <CalcRow label="Sec. 12 Requested" box="12c" value={c12.c} bold highlight />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Export button */}
+            <div style={{ padding: 20, background: C.pale, borderRadius: 10, border: `1.5px solid ${C.border}` }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: C.ink, marginBottom: 4 }}>Download Completed SF-270 PDF</div>
+              <div style={{ fontSize: 12, color: C.muted, marginBottom: 16, lineHeight: 1.5 }}>
+                Fills your form data directly into the official SF-270 PDF and downloads it — ready to review and submit.
+              </div>
+
+              {exportStatus === "idle" && (
+                <button onClick={doExport}
+                  style={{ padding: "12px 28px", background: C.navy, color: C.white, border: "none", borderRadius: 7, fontSize: 14, fontWeight: 700, cursor: "pointer", letterSpacing: "0.01em" }}>
+                  ↓ Download Filled SF-270 PDF
+                </button>
+              )}
+
+              {exportStatus === "loading" && (
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{ width: 20, height: 20, border: `2px solid ${C.border}`, borderTopColor: C.mid, borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+                  <span style={{ fontSize: 13, color: C.mid }}>{exportMsg}</span>
+                </div>
+              )}
+
+              {exportStatus === "done" && (
+                <div>
+                  <div style={{ fontSize: 13, color: C.green, fontWeight: 600, marginBottom: 12 }}>✓ {exportMsg}</div>
+                  <button onClick={() => { setExportStatus("idle"); setExportMsg(""); }}
+                    style={{ padding: "10px 20px", background: C.navy, color: C.white, border: "none", borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: "pointer", marginRight: 10 }}>
+                    Fill Another
+                  </button>
+                </div>
+              )}
+
+              {exportStatus === "error" && (
+                <div>
+                  <div style={{ fontSize: 13, color: C.red, marginBottom: 12 }}>{exportMsg}</div>
+                  <button onClick={() => { setExportStatus("idle"); setExportMsg(""); }}
+                    style={{ padding: "10px 20px", background: "none", color: C.muted, border: `1px solid ${C.border}`, borderRadius: 7, fontSize: 13, cursor: "pointer" }}>
+                    Try Again
+                  </button>
+                </div>
+              )}
+            </div>
+          </SectionCard>
+
+        </div>
+      </div>
+
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+      `}</style>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
+</script>
+</body>
+</html>
