@@ -1,5 +1,4 @@
-eJoe SF-270 Payment Request Helper
-Version 1.x.x
+eJoe SF-270 Payment Request Helper tools:All Versions
 ⚠️ Important Disclaimer
 This tool is provided for educational and informational purposes only.
 No Financial or Legal Advice
