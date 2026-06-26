@@ -22,22 +22,13 @@
       max-width: 680px;
       margin: 0 auto;
     }
-    .eyebrow {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      font-weight: 500;
-      letter-spacing: 0.18em;
-      color: #5B8DBE;
-      text-transform: uppercase;
-      margin-bottom: 20px;
-    }
     .logo {
-      font-size: 42px;
+      font-size: 52px;
       font-weight: 800;
       color: #FFFFFF;
       letter-spacing: -0.04em;
       line-height: 1;
-      margin-bottom: 8px;
+      margin-bottom: 10px;
     }
     .logo span {
       color: #4A8FD4;
@@ -47,7 +38,55 @@
       color: #7B91B0;
       line-height: 1.6;
       max-width: 440px;
-      margin: 0 auto 48px;
+      margin: 0 auto 28px;
+    }
+    .form-info {
+      background: rgba(30, 48, 80, 0.6);
+      border: 1px solid #1E3050;
+      border-radius: 10px;
+      padding: 18px 22px;
+      margin: 0 auto 36px;
+      max-width: 560px;
+    }
+    .form-title {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      font-weight: 500;
+      color: #D0DCF0;
+      letter-spacing: 0.04em;
+      margin-bottom: 4px;
+    }
+    .form-meta {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: #4A6080;
+      margin-bottom: 14px;
+      letter-spacing: 0.06em;
+    }
+    .form-links {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .form-link {
+      font-size: 13px;
+      font-weight: 600;
+      color: #4A8FD4;
+      text-decoration: none;
+      transition: color .15s;
+    }
+    .form-link:hover { color: #7BA3D0; }
+    .form-sep { color: #2E4460; }
+    .form-notice {
+      font-size: 11px;
+      color: #4A6080;
+      line-height: 1.5;
+      border-top: 1px solid #1E3050;
+      padding-top: 10px;
+      margin-top: 2px;
     }
 
     /* ── Divider rule ── */
@@ -193,12 +232,21 @@
 <body>
 
   <header class="header">
-    <div class="eyebrow">Federal Grants · Payment Requests · SF-270</div>
     <div class="logo">e<span>Joe</span></div>
     <p class="tagline">
       A free browser-based toolkit to help grant recipients understand,
       prepare, and review SF-270 payment requests.
     </p>
+    <div class="form-info">
+      <div class="form-title">SF-270 · Request for Advance or Reimbursement</div>
+      <div class="form-meta">OMB Control No. 4040-0012 · Expiration 06/30/2028</div>
+      <div class="form-links">
+        <a href="SF270_fillable-Copy.pdf" class="form-link" download>↓ Download our fillable SF-270 PDF</a>
+        <span class="form-sep">·</span>
+        <a href="https://www.grants.gov/forms/post-award-reporting-forms" class="form-link" target="_blank" rel="noopener">Check grants.gov for the current version ↗</a>
+      </div>
+      <div class="form-notice">⚠ Always verify you are using the most current version of this form at grants.gov before submitting.</div>
+    </div>
   </header>
 
   <div class="rule"></div>
