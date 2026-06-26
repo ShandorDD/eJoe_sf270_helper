@@ -1,0 +1,988 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>eJoe SF-270 Bot · v2.0.0</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;600;700&display=swap" rel="stylesheet"/>
+  <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html,body{height:100%;background:#010901;color:#00FF41;font-family:'JetBrains Mono','Courier New',monospace;overflow:hidden}
+    #root{height:100vh;display:flex;flex-direction:column}
+
+    /* scanlines */
+    body::after{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,255,65,0.03) 3px,rgba(0,255,65,0.03) 4px);pointer-events:none;z-index:9999}
+
+    /* layout */
+    .screen{display:none;flex-direction:column;height:100%;width:100%}
+    .screen.active{display:flex}
+
+    /* header bar */
+    .hbar{display:flex;justify-content:space-between;align-items:center;padding:8px 20px;border-bottom:1px solid rgba(0,255,65,0.2);font-size:11px;opacity:0.5;flex-shrink:0}
+
+    /* wizard portrait area */
+    .portrait-wrap{display:flex;align-items:flex-start;gap:24px;padding:16px 24px;flex-shrink:0}
+    .portrait{width:160px;flex-shrink:0}
+    .portrait svg{width:160px;height:160px}
+    .speech-bubble{flex:1;background:rgba(0,255,65,0.04);border:1px solid rgba(0,255,65,0.3);border-radius:4px;padding:16px 20px;position:relative;min-height:100px}
+    .speech-bubble::before{content:'';position:absolute;left:-10px;top:30px;border:5px solid transparent;border-right-color:rgba(0,255,65,0.3)}
+    .speech-bubble::after{content:'';position:absolute;left:-8px;top:31px;border:4px solid transparent;border-right-color:#010901}
+    .ejoe-name{font-size:10px;font-weight:700;letter-spacing:0.15em;color:#00FF41;opacity:0.5;margin-bottom:8px}
+    .ejoe-text{font-size:14px;line-height:1.7;color:#00FF41;min-height:60px}
+    .cursor{display:inline-block;animation:blink 1s step-end infinite}
+    @keyframes blink{50%{opacity:0}}
+
+    /* input area */
+    .input-area{flex:1;overflow-y:auto;padding:16px 24px 24px;display:flex;flex-direction:column;gap:12px}
+    .input-area::-webkit-scrollbar{width:4px}
+    .input-area::-webkit-scrollbar-thumb{background:rgba(0,255,65,0.3)}
+
+    /* field styles */
+    .field-group{display:flex;flex-direction:column;gap:6px}
+    .field-label{font-size:11px;letter-spacing:0.1em;opacity:0.6}
+    .field-input{background:#010901;border:1px solid rgba(0,255,65,0.4);color:#00FF41;font-family:'JetBrains Mono',monospace;font-size:14px;padding:10px 14px;outline:none;transition:border-color .2s;width:100%}
+    .field-input:focus{border-color:#00FF41;box-shadow:0 0 8px rgba(0,255,65,0.2)}
+    .field-input::placeholder{color:rgba(0,255,65,0.25)}
+    select.field-input option{background:#010901}
+    .field-input.warn{border-color:#FFB800;color:#FFB800}
+
+    /* grid helpers */
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+
+    /* buttons */
+    .btn-row{display:flex;gap:12px;flex-wrap:wrap;padding:0 24px 16px;flex-shrink:0}
+    .btn{background:transparent;border:1px solid #00FF41;color:#00FF41;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;padding:10px 24px;cursor:pointer;letter-spacing:0.08em;transition:all .15s}
+    .btn:hover{background:#00FF41;color:#010901}
+    .btn.secondary{border-color:rgba(0,255,65,0.4);color:rgba(0,255,65,0.5)}
+    .btn.secondary:hover{border-color:#00FF41;color:#00FF41;background:transparent}
+    .btn.danger{border-color:#FF4141;color:#FF4141}
+    .btn.danger:hover{background:#FF4141;color:#010901}
+
+    /* progress bar */
+    .progress-wrap{padding:0 24px 8px;flex-shrink:0}
+    .progress-track{height:2px;background:rgba(0,255,65,0.1);width:100%}
+    .progress-fill{height:2px;background:#00FF41;transition:width .4s;box-shadow:0 0 6px rgba(0,255,65,0.5)}
+    .progress-label{font-size:10px;opacity:0.4;margin-bottom:6px;letter-spacing:0.08em}
+
+    /* info box */
+    .info-box{background:rgba(0,255,65,0.04);border:1px solid rgba(0,255,65,0.25);padding:12px 16px;font-size:12px;line-height:1.7;margin-top:4px}
+    .info-box.warn{border-color:rgba(255,184,0,0.4);color:#FFB800;background:rgba(255,184,0,0.04)}
+    .info-box.ok{border-color:rgba(0,255,65,0.5);color:#00FF41}
+
+    /* calc display */
+    .calc-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(0,255,65,0.1);font-size:13px}
+    .calc-row.total{border-top:1px solid rgba(0,255,65,0.4);border-bottom:none;padding-top:10px;margin-top:4px;font-weight:700;font-size:15px}
+    .calc-label{opacity:0.7}
+    .calc-box-ref{font-size:10px;opacity:0.4;margin-left:8px;font-weight:400}
+    .calc-value{font-weight:700;letter-spacing:0.05em}
+    .calc-value.highlight{color:#00FF41;text-shadow:0 0 8px rgba(0,255,65,0.5)}
+
+    /* INTRO SCREEN */
+    #screen-intro{justify-content:center;align-items:center;padding:40px}
+    .intro-center{max-width:560px;width:100%;text-align:center}
+    .intro-title{font-size:36px;font-weight:700;letter-spacing:0.1em;margin-bottom:4px;text-shadow:0 0 20px rgba(0,255,65,0.5)}
+    .intro-sub{font-size:12px;letter-spacing:0.2em;opacity:0.5;margin-bottom:32px}
+    .intro-portrait{margin:0 auto 28px;width:140px;height:140px;position:relative}
+    @keyframes flicker{0%,100%{opacity:1}50%{opacity:0.85}75%{opacity:0.95}}
+    .intro-portrait svg{animation:flicker 4s ease-in-out infinite}
+    @keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+    .intro-center{animation:slideUp .6s ease forwards}
+
+    /* DISCLAIMER */
+    #screen-disclaimer{justify-content:center;align-items:center;padding:32px}
+    .disclaimer-box{max-width:560px;width:100%;border:1px solid rgba(0,255,65,0.3);padding:28px;background:rgba(0,255,65,0.02)}
+    .disclaimer-title{font-size:13px;font-weight:700;letter-spacing:0.15em;margin-bottom:16px;opacity:0.8}
+    .disclaimer-text{font-size:12px;line-height:1.9;opacity:0.65;margin-bottom:20px}
+
+    /* FINAL REPORT */
+    .report-section{margin-bottom:20px}
+    .report-section-title{font-size:11px;letter-spacing:0.15em;opacity:0.5;padding-bottom:6px;border-bottom:1px solid rgba(0,255,65,0.2);margin-bottom:10px}
+    .report-row{display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid rgba(0,255,65,0.07)}
+    .report-key{opacity:0.6;font-size:11px}
+    .report-val{text-align:right;max-width:60%;word-break:break-word}
+    .justification-text{font-size:12px;line-height:1.8;opacity:0.8;padding:10px;border:1px solid rgba(0,255,65,0.2);background:rgba(0,255,65,0.02);white-space:pre-wrap;margin-top:8px}
+
+    @media(max-width:600px){
+      .portrait-wrap{flex-direction:column}
+      .portrait{width:100%;text-align:center}
+      .speech-bubble::before,.speech-bubble::after{display:none}
+      .grid2,.grid3{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+<body>
+<div id="root">
+
+<!-- ══════════════════════════════════════════ -->
+<!-- INTRO SCREEN                               -->
+<!-- ══════════════════════════════════════════ -->
+<div id="screen-intro" class="screen active">
+  <div class="intro-center">
+    <div class="intro-portrait" id="intro-portrait"></div>
+    <div class="intro-title">eJoe</div>
+    <div class="intro-sub">SF-270 BOT · v2.0.0</div>
+    <div class="ejoe-text" id="intro-text" style="margin-bottom:28px;font-size:13px;line-height:1.8;opacity:0.85"></div>
+    <button class="btn" onclick="startDisclaimer()">[ YES, TEACH ME ]</button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════ -->
+<!-- DISCLAIMER SCREEN                          -->
+<!-- ══════════════════════════════════════════ -->
+<div id="screen-disclaimer" class="screen">
+  <div class="disclaimer-box">
+    <div class="disclaimer-title">⚠ BEFORE WE BEGIN :: IMPORTANT NOTICE</div>
+    <div class="disclaimer-text">
+This interactive wizard is provided for <strong>educational and informational purposes only</strong>.<br><br>
+• It does not constitute financial, legal, or accounting advice of any kind.<br>
+• All calculations and field mappings are illustrative guides — not official determinations.<br>
+• You are solely responsible for verifying the accuracy of all information before submitting any federal form.<br>
+• The SF-270 is a legal document. The certifying official attests to the accuracy of all information submitted.<br>
+• This tool is not affiliated with, endorsed by, or approved by any federal agency or the Office of Management and Budget.<br><br>
+By continuing, you acknowledge these terms and agree that you will verify all outputs with your grants management, finance, or legal team before submission.
+    </div>
+    <div class="btn-row" style="padding:0">
+      <button class="btn" onclick="startWizard()">[ I UNDERSTAND — LET'S BEGIN ]</button>
+      <button class="btn secondary" onclick="goIntro()">[ GO BACK ]</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════ -->
+<!-- MAIN WIZARD SCREEN                         -->
+<!-- ══════════════════════════════════════════ -->
+<div id="screen-wizard" class="screen">
+  <div class="hbar">
+    <span id="step-label">STEP 1 OF 10</span>
+    <span>eJoe SF-270 BOT :: v2.0.0</span>
+    <span id="hbar-right">OMB 4040-0012</span>
+  </div>
+  <div class="progress-wrap">
+    <div class="progress-label" id="progress-label">GETTING STARTED</div>
+    <div class="progress-track"><div class="progress-fill" id="progress-fill" style="width:10%"></div></div>
+  </div>
+  <div class="portrait-wrap">
+    <div class="portrait" id="wizard-portrait"></div>
+    <div class="speech-bubble">
+      <div class="ejoe-name">eJoe :: SF-270 BOT</div>
+      <div class="ejoe-text" id="wizard-text"></div>
+    </div>
+  </div>
+  <div class="input-area" id="input-area"></div>
+  <div class="btn-row" id="btn-row">
+    <button class="btn" id="btn-next" onclick="nextStep()">[ CONTINUE ]</button>
+    <button class="btn secondary" id="btn-back" onclick="prevStep()">[ BACK ]</button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════ -->
+<!-- FINAL REPORT SCREEN                        -->
+<!-- ══════════════════════════════════════════ -->
+<div id="screen-report" class="screen">
+  <div class="hbar">
+    <span>eJoe SF-270 BOT :: MISSION COMPLETE</span>
+    <span>OMB 4040-0012</span>
+  </div>
+  <div class="input-area" id="report-area"></div>
+  <div class="btn-row">
+    <button class="btn" onclick="exportReport()">[ DOWNLOAD FILLED SF-270 PDF ]</button>
+    <button class="btn secondary" onclick="goIntro()">[ START OVER ]</button>
+  </div>
+</div>
+
+</div><!-- /root -->
+
+<script>
+// ══════════════════════════════════════════════
+// eJoe SVG portrait (dot-matrix style, compact)
+// ══════════════════════════════════════════════
+function eJoeSVG(size=160){
+  // Unique IDs per instance to avoid filter conflicts when rendered twice
+  const uid = Math.random().toString(36).slice(2,6);
+  return `<svg width="${size}" height="${size}" viewBox="0 0 260 310" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="gl${uid}"><feGaussianBlur stdDeviation="1.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="gl2${uid}"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <style>
+      .arm-l-${uid}{transform-origin:88px 215px;animation:waveL${uid} 1.8s ease-in-out infinite}
+      .arm-r-${uid}{transform-origin:172px 215px;animation:waveR${uid} 1.8s ease-in-out infinite}
+      @keyframes waveL${uid}{0%,100%{transform:rotate(0deg)}25%{transform:rotate(-28deg)}75%{transform:rotate(-10deg)}}
+      @keyframes waveR${uid}{0%,100%{transform:rotate(0deg)}25%{transform:rotate(28deg)}75%{transform:rotate(10deg)}}
+      .eyelL-${uid}{transform-origin:104px 143px;animation:blinkL${uid} 3.5s ease-in-out infinite}
+      .eyelR-${uid}{transform-origin:156px 143px;animation:blinkR${uid} 3.5s ease-in-out infinite}
+      @keyframes blinkL${uid}{0%,88%,100%{transform:scaleY(1)}93%{transform:scaleY(0.06)}}
+      @keyframes blinkR${uid}{0%,90%,100%{transform:scaleY(1)}95%{transform:scaleY(0.06)}}
+      .mouth-${uid}{animation:talk${uid} 2.2s step-end infinite}
+      @keyframes talk${uid}{0%,100%{opacity:1}20%{opacity:0.2}45%{opacity:1}65%{opacity:0.4}85%{opacity:1}}
+      .hatbob-${uid}{transform-origin:130px 60px;animation:bob${uid} 3s ease-in-out infinite}
+      @keyframes bob${uid}{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+      .starspin-${uid}{transform-origin:130px 44px;animation:spin${uid} 6s linear infinite}
+      @keyframes spin${uid}{to{transform:rotate(360deg)}}
+      .pulse-${uid}{animation:pul${uid} 2s ease-in-out infinite}
+      @keyframes pul${uid}{0%,100%{opacity:.45}50%{opacity:1}}
+      .cur-${uid}{animation:cur${uid} 1s step-end infinite}
+      @keyframes cur${uid}{50%{opacity:0}}
+    </style>
+  </defs>
+  <rect width="260" height="310" fill="#020C02"/>
+
+  <!-- HAT -->
+  <g class="hatbob-${uid}">
+    <polygon points="130,10 100,90 160,90" fill="#010e01"/>
+    <polygon points="130,10 100,90 130,90" fill="#021602"/>
+    <line x1="130" y1="10" x2="100" y2="90" stroke="#00FF41" stroke-width="1.2" stroke-opacity="0.8" filter="url(#gl${uid})"/>
+    <line x1="130" y1="10" x2="160" y2="90" stroke="#00FF41" stroke-width="0.8" stroke-opacity="0.4"/>
+    <circle cx="130" cy="10" r="3" fill="#00FF41" filter="url(#gl2${uid})"/>
+    <!-- Star badge -->
+    <g class="starspin-${uid}">
+      <circle cx="130" cy="44" r="12" fill="#010901" stroke="#00FF41" stroke-width="0.8" stroke-opacity="0.6"/>
+      <polygon points="130,34 132,41 140,41 133,46 136,53 130,48 124,53 127,46 120,41 128,41" fill="#00FF41" opacity="0.8" filter="url(#gl${uid})"/>
+      <circle cx="130" cy="44" r="2.5" fill="#00FF41"/>
+    </g>
+    <!-- Band -->
+    <rect x="96" y="87" width="68" height="9" rx="1" fill="#010901" stroke="#00FF41" stroke-width="0.9" stroke-opacity="0.65"/>
+    <!-- Brim -->
+    <ellipse cx="130" cy="99" rx="58" ry="7" fill="#010e01"/>
+    <ellipse cx="130" cy="98" rx="57" ry="6" fill="none" stroke="#00FF41" stroke-width="1.2" stroke-opacity="0.7" filter="url(#gl${uid})"/>
+  </g>
+
+  <!-- HEAD -->
+  <rect x="82" y="104" width="96" height="76" rx="8" fill="#010e01" stroke="#00FF41" stroke-width="1.2" stroke-opacity="0.7" filter="url(#gl${uid})"/>
+  <!-- Eyes -->
+  <rect x="90" y="114" width="30" height="22" rx="3" fill="#000800" stroke="#00FF41" stroke-width="0.9" stroke-opacity="0.55"/>
+  <rect x="92" y="116" width="26" height="18" rx="2" fill="#002800"/>
+  <g class="eyelL-${uid}">
+    <circle cx="105" cy="125" r="7" fill="#004400" stroke="#00FF41" stroke-width="0.6"/>
+    <circle cx="105" cy="125" r="4" fill="#00FF41" opacity="0.9" filter="url(#gl${uid})"/>
+    <circle cx="105" cy="125" r="1.8" fill="#CCFFCC"/>
+    <circle cx="107" cy="122" r="1.2" fill="white" opacity="0.4"/>
+  </g>
+  <rect x="140" y="114" width="30" height="22" rx="3" fill="#000800" stroke="#00FF41" stroke-width="0.9" stroke-opacity="0.55"/>
+  <rect x="142" y="116" width="26" height="18" rx="2" fill="#002800"/>
+  <g class="eyelR-${uid}">
+    <circle cx="155" cy="125" r="7" fill="#004400" stroke="#00FF41" stroke-width="0.6"/>
+    <circle cx="155" cy="125" r="4" fill="#00FF41" opacity="0.9" filter="url(#gl${uid})"/>
+    <circle cx="155" cy="125" r="1.8" fill="#CCFFCC"/>
+    <circle cx="157" cy="122" r="1.2" fill="white" opacity="0.4"/>
+  </g>
+  <!-- Nose LED -->
+  <circle cx="130" cy="146" r="2.5" fill="#010901" stroke="#00FF41" stroke-width="0.8" stroke-opacity="0.5"/>
+  <circle cx="130" cy="146" r="1.2" fill="#00FF41" opacity="0.6" class="pulse-${uid}"/>
+  <!-- Mouth -->
+  <rect x="100" y="155" width="60" height="12" rx="2" fill="#000800" stroke="#00FF41" stroke-width="0.9" stroke-opacity="0.55"/>
+  <g class="mouth-${uid}">
+    <rect x="103" y="158" width="5" height="6" rx="1" fill="#00FF41" opacity="0.9"/>
+    <rect x="111" y="158" width="5" height="6" rx="1" fill="#00FF41" opacity="0.5"/>
+    <rect x="119" y="158" width="5" height="6" rx="1" fill="#00FF41" opacity="0.9"/>
+    <rect x="127" y="158" width="5" height="6" rx="1" fill="#00FF41" opacity="0.6"/>
+    <rect x="135" y="158" width="5" height="6" rx="1" fill="#00FF41" opacity="0.9"/>
+    <rect x="143" y="158" width="5" height="6" rx="1" fill="#00FF41" opacity="0.4"/>
+    <rect x="151" y="158" width="5" height="6" rx="1" fill="#00FF41" opacity="0.9"/>
+  </g>
+  <!-- Head bolts -->
+  <circle cx="87" cy="110" r="2.5" fill="#010901" stroke="#00FF41" stroke-width="0.9" stroke-opacity="0.5"/>
+  <circle cx="173" cy="110" r="2.5" fill="#010901" stroke="#00FF41" stroke-width="0.9" stroke-opacity="0.5"/>
+  <circle cx="87" cy="174" r="2.5" fill="#010901" stroke="#00FF41" stroke-width="0.9" stroke-opacity="0.5"/>
+  <circle cx="173" cy="174" r="2.5" fill="#010901" stroke="#00FF41" stroke-width="0.9" stroke-opacity="0.5"/>
+
+  <!-- NECK -->
+  <rect x="116" y="180" width="28" height="10" rx="2" fill="#010901" stroke="#00FF41" stroke-width="0.9" stroke-opacity="0.45"/>
+  <line x1="124" y1="180" x2="124" y2="190" stroke="#00FF41" stroke-width="0.8" stroke-opacity="0.25"/>
+  <line x1="130" y1="180" x2="130" y2="190" stroke="#00FF41" stroke-width="0.8" stroke-opacity="0.25"/>
+  <line x1="136" y1="180" x2="136" y2="190" stroke="#00FF41" stroke-width="0.8" stroke-opacity="0.25"/>
+
+  <!-- BODY -->
+  <rect x="88" y="190" width="84" height="64" rx="6" fill="#010e01" stroke="#00FF41" stroke-width="1.2" stroke-opacity="0.65"/>
+  <rect x="96" y="198" width="68" height="48" rx="4" fill="#000800" stroke="#00FF41" stroke-width="0.5" stroke-opacity="0.2"/>
+  <!-- Chest label -->
+  <rect x="100" y="202" width="60" height="16" rx="2" fill="#001200" stroke="#00FF41" stroke-width="0.8" stroke-opacity="0.45"/>
+  <text x="130" y="214" font-family="'JetBrains Mono',monospace" font-size="7" font-weight="700" fill="#00FF41" text-anchor="middle" filter="url(#gl${uid})">eJoe</text>
+  <!-- Chest buttons -->
+  <circle cx="106" cy="232" r="4" fill="#010901" stroke="#00FF41" stroke-width="0.9" stroke-opacity="0.55"/>
+  <circle cx="120" cy="232" r="4" fill="#010901" stroke="#00FF41" stroke-width="0.9" stroke-opacity="0.55"/>
+  <circle cx="130" cy="232" r="4" fill="#010901" stroke="#00FF41" stroke-width="0.9" stroke-opacity="0.55"/>  
+  <circle cx="140" cy="232" r="4" fill="#010901" stroke="#00FF41" stroke-width="0.9" stroke-opacity="0.55"/>
+  <circle cx="154" cy="232" r="4" fill="#010901" stroke="#00FF41" stroke-width="0.9" stroke-opacity="0.55"/>
+  <circle cx="106" cy="232" r="2" fill="#00FF41" class="pulse-${uid}"/>
+  <circle cx="130" cy="232" r="2" fill="#00FF41" opacity="0.5"/>
+  <circle cx="154" cy="232" r="2" fill="#00FF41" class="pulse-${uid}" style="animation-delay:.9s"/>
+
+  <!-- LEFT ARM -->
+  <g class="arm-l-${uid}">
+    <circle cx="88" cy="200" r="5" fill="#010901" stroke="#00FF41" stroke-width="0.9" stroke-opacity="0.65"/>
+    <rect x="62" y="196" width="28" height="10" rx="4" fill="#010e01" stroke="#00FF41" stroke-width="0.9" stroke-opacity="0.55"/>
+    <circle cx="62" cy="201" r="5" fill="#010901" stroke="#00FF41" stroke-width="0.9" stroke-opacity="0.55"/>
+    <rect x="36" y="198" width="28" height="9" rx="4" fill="#010e01" stroke="#00FF41" stroke-width="0.9" stroke-opacity="0.55"/>
+    <rect x="28" y="196" width="9" height="5" rx="2" fill="#010901" stroke="#00FF41" stroke-width="0.8" stroke-opacity="0.6"/>
+    <rect x="28" y="204" width="9" height="5" rx="2" fill="#010901" stroke="#00FF41" stroke-width="0.8" stroke-opacity="0.6"/>
+  </g>
+
+  <!-- RIGHT ARM -->
+  <g class="arm-r-${uid}">
+    <circle cx="172" cy="200" r="5" fill="#010901" stroke="#00FF41" stroke-width="0.9" stroke-opacity="0.65"/>
+    <rect x="170" y="196" width="28" height="10" rx="4" fill="#010e01" stroke="#00FF41" stroke-width="0.9" stroke-opacity="0.55"/>
+    <circle cx="198" cy="201" r="5" fill="#010901" stroke="#00FF41" stroke-width="0.9" stroke-opacity="0.55"/>
+    <rect x="196" y="198" width="28" height="9" rx="4" fill="#010e01" stroke="#00FF41" stroke-width="0.9" stroke-opacity="0.55"/>
+    <rect x="223" y="196" width="9" height="5" rx="2" fill="#010901" stroke="#00FF41" stroke-width="0.8" stroke-opacity="0.6"/>
+    <rect x="223" y="204" width="9" height="5" rx="2" fill="#010901" stroke="#00FF41" stroke-width="0.8" stroke-opacity="0.6"/>
+  </g>
+
+  <!-- LEGS -->
+  <rect x="104" y="254" width="20" height="8" rx="3" fill="#010901" stroke="#00FF41" stroke-width="0.9" stroke-opacity="0.45"/>
+  <rect x="136" y="254" width="20" height="8" rx="3" fill="#010901" stroke="#00FF41" stroke-width="0.9" stroke-opacity="0.45"/>
+  <rect x="102" y="261" width="18" height="8" rx="3" fill="#010e01" stroke="#00FF41" stroke-width="1" stroke-opacity="0.55"/>
+  <rect x="140" y="261" width="18" height="8" rx="3" fill="#010e01" stroke="#00FF41" stroke-width="1" stroke-opacity="0.55"/>
+</svg>`;
+}
+
+// ══════════════════════════════════════════════
+// State
+// ══════════════════════════════════════════════
+const STATE = {
+  // org
+  firstName:'', lastName:'', title:'', email:'', phone:'',
+  orgName:'', street1:'', street2:'', city:'', state:'', zip:'', country:'',
+  agency:'', fain:'', employerId:'',
+  // accounting
+  accountingBasis:'', noAccounting:false,
+  // period
+  periodStart:'', periodEnd:'', asOfDate:'', paymentNum:'1',
+  paymentFinal:'PARTIAL',
+  // financials
+  allOutlays:'', programIncome:'0', costShare:'0', advanceAmount:'0',
+  pastAmount:'0', awardTotal:'', hasCostShare:'no', hasProgramIncome:'no',
+  hasAdvance:'no', hasReceived:'no',
+  // justification
+  needsJustification:'no', justificationItems:[], justificationOther:'',
+  // computed
+  c11c:0, c11e:0, c11g:0, c11i:0,
+};
+
+let currentStep = 0;
+
+// ══════════════════════════════════════════════
+// Typewriter
+// ══════════════════════════════════════════════
+let typeTimer = null;
+function typeText(el, text, speed=18, cb){
+  if(typeTimer) clearTimeout(typeTimer);
+  el.textContent = '';
+  let i=0;
+  function tick(){
+    if(i<text.length){ el.textContent += text[i++]; typeTimer=setTimeout(tick,speed); }
+    else if(cb) cb();
+  }
+  tick();
+}
+
+// ══════════════════════════════════════════════
+// Screen management
+// ══════════════════════════════════════════════
+function showScreen(id){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+function goIntro(){
+  showScreen('screen-intro');
+  document.getElementById('intro-portrait').innerHTML = eJoeSVG(140);
+  const el = document.getElementById('intro-text');
+  typeText(el,"WHO DARES DISTURB eJoe...?\n\nDo you wish to learn the ancient secrets\nof the SF-270 Payment Request Form?",20);
+}
+
+function startDisclaimer(){ showScreen('screen-disclaimer'); }
+function startWizard(){ showScreen('screen-wizard'); currentStep=0; renderStep(); }
+
+// ══════════════════════════════════════════════
+// Step definitions
+// ══════════════════════════════════════════════
+const STEPS = [
+  {
+    id:'identity',
+    label:'WHO ARE YOU?',
+    progress:10,
+    text:"Greetings, seeker!\n\nBefore we begin, I need to know who you are and what organization you represent. This will populate the recipient information on your SF-270.",
+    render(){
+      return `
+      <div class="grid2">
+        <div class="field-group"><div class="field-label">FIRST NAME *</div><input class="field-input" id="f-firstName" placeholder="Jane" value="${STATE.firstName}"/></div>
+        <div class="field-group"><div class="field-label">LAST NAME *</div><input class="field-input" id="f-lastName" placeholder="Smith" value="${STATE.lastName}"/></div>
+      </div>
+      <div class="grid2">
+        <div class="field-group"><div class="field-label">TITLE / ROLE *</div><input class="field-input" id="f-title" placeholder="Grants Manager" value="${STATE.title}"/></div>
+        <div class="field-group"><div class="field-label">EMAIL *</div><input class="field-input" id="f-email" type="email" placeholder="name@org.gov" value="${STATE.email}"/></div>
+      </div>
+      <div class="field-group"><div class="field-label">PHONE</div><input class="field-input" id="f-phone" placeholder="(555) 000-0000" value="${STATE.phone}"/></div>
+      <div class="field-group"><div class="field-label">ORGANIZATION NAME *</div><input class="field-input" id="f-orgName" placeholder="City of Springfield" value="${STATE.orgName}"/></div>
+      <div class="grid2">
+        <div class="field-group"><div class="field-label">STREET 1</div><input class="field-input" id="f-street1" placeholder="123 Main St" value="${STATE.street1}"/></div>
+        <div class="field-group"><div class="field-label">STREET 2</div><input class="field-input" id="f-street2" placeholder="Suite 100" value="${STATE.street2}"/></div>
+      </div>
+      <div class="grid3">
+        <div class="field-group"><div class="field-label">CITY</div><input class="field-input" id="f-city" value="${STATE.city}"/></div>
+        <div class="field-group"><div class="field-label">STATE</div><input class="field-input" id="f-state" value="${STATE.state}"/></div>
+        <div class="field-group"><div class="field-label">ZIP</div><input class="field-input" id="f-zip" value="${STATE.zip}"/></div>
+      </div>`;
+    },
+    save(){
+      STATE.firstName=v('firstName'); STATE.lastName=v('lastName');
+      STATE.title=v('title'); STATE.email=v('email'); STATE.phone=v('phone');
+      STATE.orgName=v('orgName'); STATE.street1=v('street1'); STATE.street2=v('street2');
+      STATE.city=v('city'); STATE.state=v('state'); STATE.zip=v('zip');
+    },
+    validate(){ return STATE.firstName && STATE.lastName && STATE.title && STATE.email && STATE.orgName; }
+  },
+  {
+    id:'award',
+    label:'THE AWARD',
+    progress:20,
+    text:"Excellent! Now tell me about the federal award. I need the federal agency name and your grant number (FAIN). This is the unique identifier assigned by your funder — check your award letter or Notice of Award.",
+    render(){
+      return `
+      <div class="field-group"><div class="field-label">FEDERAL SPONSORING AGENCY *</div><input class="field-input" id="f-agency" placeholder="e.g. Department of Health and Human Services" value="${STATE.agency}"/></div>
+      <div class="grid2">
+        <div class="field-group"><div class="field-label">FEDERAL AWARD / GRANT NUMBER (FAIN) *</div><input class="field-input" id="f-fain" placeholder="e.g. 1H79SP123456-01" value="${STATE.fain}"/></div>
+        <div class="field-group"><div class="field-label">EMPLOYER ID NUMBER (EIN)</div><input class="field-input" id="f-employerId" placeholder="XX-XXXXXXX" value="${STATE.employerId}"/></div>
+      </div>
+      <div class="field-group"><div class="field-label">TOTAL AWARD AMOUNT $</div><input class="field-input" id="f-awardTotal" type="number" placeholder="0.00" value="${STATE.awardTotal}"/></div>
+      <div class="info-box">📋 Your FAIN appears on your Notice of Award (NOA). Your EIN is your organization's federal tax ID. The total award amount helps eJoe give context to your request.</div>`;
+    },
+    save(){ STATE.agency=v('agency'); STATE.fain=v('fain'); STATE.employerId=v('employerId'); STATE.awardTotal=v('awardTotal'); },
+    validate(){ return STATE.agency && STATE.fain; }
+  },
+  {
+    id:'accounting',
+    label:'ACCOUNTING BASIS',
+    progress:30,
+    text:"Now, a crucial question. What type of accounting system does your organization use? This determines how your expenditures are recorded and reported. Choose wisely — this is Box 2 on the SF-270.",
+    render(){
+      const sel = STATE.accountingBasis;
+      const warn = sel==='unknown';
+      const noAcc = sel==='none';
+      return `
+      <div class="field-group">
+        <div class="field-label">ACCOUNTING SYSTEM *</div>
+        <select class="field-input${warn||noAcc?' warn':''}" id="f-accountingBasis" onchange="renderInfo(this.value)">
+          <option value="" ${!sel?'selected':''}>-- SELECT ONE --</option>
+          <option value="CASH" ${sel==='CASH'?'selected':''}>CASH BASIS</option>
+          <option value="ACCRUAL" ${sel==='ACCRUAL'?'selected':''}>ACCRUAL BASIS</option>
+          <option value="unknown" ${sel==='unknown'?'selected':''}>I DON'T KNOW</option>
+          <option value="none" ${sel==='none'?'selected':''}>I DON'T HAVE AN ACCOUNTING SYSTEM</option>
+        </select>
+      </div>
+      <div id="accounting-info">
+        ${sel==='CASH'?`<div class="info-box ok">Cash basis means expenditures are recorded when cash is actually paid. This is common for smaller organizations. Your SF-270 will be prepared on a cash basis.</div>`:''}
+        ${sel==='ACCRUAL'?`<div class="info-box ok">Accrual basis records expenditures when they are incurred, regardless of when payment occurs. More common in larger organizations. Your SF-270 will be prepared on an accrual basis.</div>`:''}
+        ${warn?`<div class="info-box warn">⚠ eJoe recommends you contact your accounting or finance department to determine your accounting basis before submitting an SF-270. You cannot proceed without knowing this. Come back when you have the answer!</div>`:''}
+        ${noAcc?`<div class="info-box warn">⚠ If your organization does not have an accounting system, eJoe strongly recommends you contact your Grants Officer immediately to discuss this before requesting payment. Federal grants require proper financial management systems. Come back after speaking with your Grants Officer!</div>`:''}
+      </div>`;
+    },
+    save(){ STATE.accountingBasis=v('accountingBasis'); },
+    validate(){ return STATE.accountingBasis==='CASH'||STATE.accountingBasis==='ACCRUAL'; },
+    blockMessage(){ return 'Please resolve your accounting system before proceeding.'; }
+  },
+  {
+    id:'period',
+    label:'PAYMENT PERIOD',
+    progress:40,
+    text:"Now let's establish the period of this request. What date range are you requesting payment for? And crucially — what is your 'as-of date'? That's the date your financial records are current through. This determines whether your request is an Advance, Reimbursement, or both.",
+    render(){
+      const type = computePaymentType();
+      const typeHtml = type?`<div class="info-box ${type.cls}">📡 PAYMENT TYPE DETECTED: <strong>${type.label}</strong><br>${type.desc}</div>`:'';
+      return `
+      <div class="grid2">
+        <div class="field-group"><div class="field-label">PERIOD START DATE *</div><input class="field-input" id="f-periodStart" type="date" value="${STATE.periodStart}" oninput="refreshTypeDetect()"/></div>
+        <div class="field-group"><div class="field-label">PERIOD END DATE *</div><input class="field-input" id="f-periodEnd" type="date" value="${STATE.periodEnd}" oninput="refreshTypeDetect()"/></div>
+      </div>
+      <div class="field-group">
+        <div class="field-label">AS-OF DATE * (date your financial records are current through)</div>
+        <input class="field-input" id="f-asOfDate" type="date" value="${STATE.asOfDate}" oninput="refreshTypeDetect()"/>
+      </div>
+      <div id="type-detect">${typeHtml}</div>
+      <div class="info-box">📋 The as-of date is critical. If it's BEFORE your period start → Advance. If it's AFTER your period end → Reimbursement. If it falls WITHIN the period → both. Make sure your accounting records are up to date as of this date.</div>
+      <div class="grid2">
+        <div class="field-group">
+          <div class="field-label">IS THIS A FINAL OR PARTIAL PAYMENT REQUEST?</div>
+          <select class="field-input" id="f-paymentFinal">
+            <option value="PARTIAL" ${STATE.paymentFinal==='PARTIAL'?'selected':''}>PARTIAL (more requests to follow)</option>
+            <option value="FINAL" ${STATE.paymentFinal==='FINAL'?'selected':''}>FINAL (this is the last request)</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <div class="field-label">PAYMENT REQUEST NUMBER</div>
+          <input class="field-input" id="f-paymentNum" type="number" min="1" value="${STATE.paymentNum}" placeholder="e.g. 1"/>
+        </div>
+      </div>`;
+    },
+    save(){
+      STATE.periodStart=v('periodStart'); STATE.periodEnd=v('periodEnd');
+      STATE.asOfDate=v('asOfDate'); STATE.paymentFinal=v('paymentFinal');
+      STATE.paymentNum=v('paymentNum')||'1';
+    },
+    validate(){ return STATE.periodStart && STATE.periodEnd && STATE.asOfDate; }
+  },
+  {
+    id:'outlays',
+    label:'EXPENDITURES',
+    progress:50,
+    text:"Now for the numbers. How much has your organization spent on this grant as of your as-of date? This is Box 11a — Total Program Outlays. This number MUST come from your official accounting records. Never estimate — use your actual financial system data.",
+    render(){
+      return `
+      <div class="field-group">
+        <div class="field-label">TOTAL PROGRAM OUTLAYS AS OF ${fmtDate(STATE.asOfDate)} (11a) *</div>
+        <input class="field-input" id="f-allOutlays" type="number" step="0.01" min="0" placeholder="0.00" value="${STATE.allOutlays}"/>
+      </div>
+      <div class="info-box warn">⚠ IMPORTANT: This figure must come directly from your accounting system. Do not estimate. If your accounting records are not current through your as-of date, update them first before proceeding.</div>
+      <div class="field-group">
+        <div class="field-label">HAVE YOU EARNED ANY PROGRAM INCOME FROM THIS PROJECT?</div>
+        <select class="field-input" id="f-hasProgramIncome" onchange="togglePI(this.value)">
+          <option value="no" ${STATE.hasProgramIncome!=='yes'?'selected':''}>NO</option>
+          <option value="yes" ${STATE.hasProgramIncome==='yes'?'selected':''}>YES</option>
+          <option value="unknown">I'M NOT SURE</option>
+        </select>
+      </div>
+      <div id="pi-section" style="display:${STATE.hasProgramIncome==='yes'?'block':'none'}">
+        <div class="field-group">
+          <div class="field-label">CUMULATIVE PROGRAM INCOME EARNED (11b)</div>
+          <input class="field-input" id="f-programIncome" type="number" step="0.01" min="0" placeholder="0.00" value="${STATE.programIncome}"/>
+        </div>
+      </div>
+      <div id="pi-unknown" style="display:${STATE.hasProgramIncome==='unknown'?'block':'none'}">
+        <div class="info-box warn">⚠ Program income is revenue earned by your organization as a direct result of grant-funded activities (e.g. fees, sales). Check your grant agreement or contact your award officer to determine if you have program income to report.</div>
+      </div>`;
+    },
+    save(){
+      STATE.allOutlays=v('allOutlays'); STATE.hasProgramIncome=v('hasProgramIncome');
+      STATE.programIncome=STATE.hasProgramIncome==='yes'?(v('programIncome')||'0'):'0';
+    },
+    validate(){ return STATE.allOutlays!==''; }
+  },
+  {
+    id:'costshare',
+    label:'COST SHARE & MATCH',
+    progress:58,
+    text:"Does your grant require cost sharing or matching? If your award has a cost share requirement, the non-federal portion you've contributed needs to be reflected here as Box 11f.",
+    render(){
+      return `
+      <div class="field-group">
+        <div class="field-label">DOES YOUR AWARD INCLUDE A COST SHARE / MATCHING REQUIREMENT?</div>
+        <select class="field-input" id="f-hasCostShare" onchange="toggleCS(this.value)">
+          <option value="no" ${STATE.hasCostShare!=='yes'?'selected':''}>NO / NOT SURE</option>
+          <option value="yes" ${STATE.hasCostShare==='yes'?'selected':''}>YES</option>
+          <option value="unknown">I'M NOT SURE — NEED TO CHECK</option>
+        </select>
+      </div>
+      <div id="cs-section" style="display:${STATE.hasCostShare==='yes'?'block':'none'}">
+        <div class="field-group">
+          <div class="field-label">NON-FEDERAL SHARE / COST SHARE AMOUNT (11f)</div>
+          <input class="field-input" id="f-costShare" type="number" step="0.01" min="0" placeholder="0.00" value="${STATE.costShare}"/>
+        </div>
+        <div class="info-box">This is the cumulative amount your organization has contributed as matching funds. It comes directly from your accounting records — same as your federal outlays.</div>
+      </div>
+      <div id="cs-unknown" style="display:${STATE.hasCostShare==='unknown'?'block':'none'}">
+        <div class="info-box warn">⚠ Check your Notice of Award (NOA) or grant agreement for any cost share or matching requirements. Look for terms like "recipient share," "matching," or "cost share." Contact your grants officer if unsure.</div>
+      </div>`;
+    },
+    save(){
+      STATE.hasCostShare=v('hasCostShare');
+      STATE.costShare=STATE.hasCostShare==='yes'?(v('costShare')||'0'):'0';
+    },
+    validate(){ return true; }
+  },
+  {
+    id:'advance',
+    label:'ADVANCE & PRIOR PAYMENTS',
+    progress:66,
+    text:"Let's talk about advances and what you've already received. This is important — the math here determines exactly how much you can request now.",
+    render(){
+      const pType = computePaymentType();
+      const showAdv = pType && (pType.type==='ADVANCE'||pType.type==='COMBO');
+      return `
+      ${showAdv?`
+      <div class="info-box ok">📡 Your request includes an ADVANCE component. Box 11d applies.</div>
+      <div class="field-group">
+        <div class="field-label">ADVANCE AMOUNT NEEDED FOR THE ADVANCE PERIOD (11d)</div>
+        <input class="field-input" id="f-advanceAmount" type="number" step="0.01" min="0" placeholder="0.00" value="${STATE.advanceAmount}"/>
+        <div class="info-box" style="margin-top:8px">This is the estimated cash you will need during the advance period — based on your projected spending. Be conservative and accurate.</div>
+      </div>`:`
+      <div class="info-box">No advance component detected for this request period. Box 11d will be $0.00.</div>
+      <input type="hidden" id="f-advanceAmount" value="0"/>`}
+      <div class="field-group" style="margin-top:12px">
+        <div class="field-label">HAVE YOU PREVIOUSLY RECEIVED FEDERAL FUNDS FOR THIS AWARD?</div>
+        <select class="field-input" id="f-hasReceived" onchange="toggleReceived(this.value)">
+          <option value="no" ${STATE.hasReceived!=='yes'?'selected':''}>NO — THIS IS MY FIRST REQUEST</option>
+          <option value="yes" ${STATE.hasReceived==='yes'?'selected':''}>YES — I HAVE RECEIVED PRIOR PAYMENTS</option>
+        </select>
+      </div>
+      <div id="received-section" style="display:${STATE.hasReceived==='yes'?'block':'none'}">
+        <div class="field-group">
+          <div class="field-label">TOTAL FEDERAL FUNDS PREVIOUSLY RECEIVED (11h) *</div>
+          <input class="field-input" id="f-pastAmount" type="number" step="0.01" min="0" placeholder="0.00" value="${STATE.pastAmount}"/>
+          <div class="info-box warn" style="margin-top:8px">⚠ VERIFY THIS NUMBER CAREFULLY. This is the cumulative total of all federal payments you have received to date. An incorrect number will invalidate your request. Cross-check with your drawdown history in your payment system (e.g. ASAP, HHS Payment Management System).</div>
+        </div>
+      </div>`;
+    },
+    save(){
+      STATE.hasReceived=v('hasReceived');
+      STATE.advanceAmount=v('advanceAmount')||'0';
+      STATE.pastAmount=STATE.hasReceived==='yes'?(v('pastAmount')||'0'):'0';
+    },
+    validate(){ return true; }
+  },
+  {
+    id:'calculations',
+    label:'THE CALCULATIONS',
+    progress:75,
+    text:"Excellent work! Now let me perform the Section 11 calculations and explain what each number means. Review these carefully before we proceed.",
+    render(){
+      const a=parseFloat(STATE.allOutlays)||0;
+      const b=parseFloat(STATE.programIncome)||0;
+      const c=a-b;
+      const d=parseFloat(STATE.advanceAmount)||0;
+      const e=c+d;
+      const f=parseFloat(STATE.costShare)||0;
+      const g=e-f;
+      const h=parseFloat(STATE.pastAmount)||0;
+      const i=g-h;
+      STATE.c11c=c; STATE.c11e=e; STATE.c11g=g; STATE.c11i=i;
+      const pType=computePaymentType();
+      const warn=i<0;
+      return `
+      <div style="border:1px solid rgba(0,255,65,0.3);padding:16px">
+        <div class="calc-row"><span class="calc-label">Total Program Outlays <span class="calc-box-ref">11a</span></span><span class="calc-value">${fmt(a)}</span></div>
+        <div class="calc-row"><span class="calc-label">Less: Program Income <span class="calc-box-ref">11b</span></span><span class="calc-value">- ${fmt(b)}</span></div>
+        <div class="calc-row"><span class="calc-label">Net Program Outlays (11a − 11b) <span class="calc-box-ref">11c</span></span><span class="calc-value">${fmt(c)}</span></div>
+        ${d>0?`<div class="calc-row"><span class="calc-label">Advance Amount <span class="calc-box-ref">11d</span></span><span class="calc-value">+ ${fmt(d)}</span></div>`:''}
+        <div class="calc-row"><span class="calc-label">Total (11c + 11d) <span class="calc-box-ref">11e</span></span><span class="calc-value">${fmt(e)}</span></div>
+        ${f>0?`<div class="calc-row"><span class="calc-label">Non-Federal / Cost Share <span class="calc-box-ref">11f</span></span><span class="calc-value">- ${fmt(f)}</span></div>`:''}
+        <div class="calc-row"><span class="calc-label">Federal Share (11e − 11f) <span class="calc-box-ref">11g</span></span><span class="calc-value">${fmt(g)}</span></div>
+        <div class="calc-row"><span class="calc-label">Federal Funds Previously Received <span class="calc-box-ref">11h</span></span><span class="calc-value">- ${fmt(h)}</span></div>
+        <div class="calc-row total"><span class="calc-label">FEDERAL SHARE NOW REQUESTED <span class="calc-box-ref">11i</span></span><span class="calc-value highlight">${fmt(i)}</span></div>
+      </div>
+      ${warn?`<div class="info-box warn" style="margin-top:12px">⚠ WARNING: Your calculated request amount is negative (${fmt(i)}). This means your previously received funds exceed your current federal share. You may have already been overpaid, or there is an error in your data. DO NOT submit this form. Contact your grants officer immediately.</div>`:''}
+      ${!warn&&i===0?`<div class="info-box warn" style="margin-top:12px">⚠ Your request amount is $0.00. This may be correct if all funds have been received, but verify before proceeding.</div>`:''}
+      ${!warn&&i>0?`<div class="info-box ok" style="margin-top:12px">✓ You are requesting ${fmt(i)} in federal funds. This represents your allowable federal share minus any funds already received${d>0?', plus your advance request':''}.</div>`:''}
+      <div class="info-box" style="margin-top:8px">📋 In plain language: You've spent ${fmt(a)} on the grant. After subtracting program income${f>0?', your cost share,':''} and what you've already received, you're entitled to request ${fmt(Math.max(0,i))} from your federal funder${d>0?' plus an advance of '+fmt(d):''}.</div>`;
+    },
+    save(){},
+    validate(){ return STATE.c11i>=0; },
+    blockMessage(){ return 'Your requested amount is negative. Please go back and verify your numbers before proceeding.'; }
+  },
+  {
+    id:'justification',
+    label:'JUSTIFICATION',
+    progress:85,
+    text:"Nearly done! Does your funder require a payment justification or narrative to accompany your request? Some agencies require a breakdown of what the funds will be used for. Check your grant terms.",
+    render(){
+      const items = Array.isArray(STATE.justificationItems)?STATE.justificationItems:[];
+      return `
+      <div class="field-group">
+        <div class="field-label">DOES YOUR FUNDER REQUIRE A PAYMENT JUSTIFICATION?</div>
+        <select class="field-input" id="f-needsJustification" onchange="toggleJust(this.value)">
+          <option value="no" ${STATE.needsJustification!=='yes'?'selected':''}>NO / NOT REQUIRED</option>
+          <option value="yes" ${STATE.needsJustification==='yes'?'selected':''}>YES — MY FUNDER REQUIRES JUSTIFICATION</option>
+        </select>
+      </div>
+      <div id="just-section" style="display:${STATE.needsJustification==='yes'?'block':'none'}">
+        <div class="field-group"><div class="field-label" style="margin-bottom:8px">COST CATEGORIES (check all that apply and enter amounts):</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px" id="just-cats">
+            ${['Personnel/Salaries','Fringe Benefits','Travel','Equipment','Supplies','Contractual/Consultants','Construction','Other Direct Costs'].map(cat=>{
+              const match=items.find(x=>x.cat===cat)||{};
+              return `<div style="display:flex;gap:8px;align-items:center">
+                <input type="checkbox" id="jc-${cat.replace(/\W/g,'')}" ${match.checked?'checked':''} style="accent-color:#00FF41;width:16px;height:16px;flex-shrink:0"/>
+                <span style="font-size:11px;flex:1">${cat}</span>
+                <input class="field-input" id="ja-${cat.replace(/\W/g,'')}" type="number" step="0.01" placeholder="$" value="${match.amount||''}" style="width:100px;padding:4px 8px;font-size:12px"/>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>
+        <div class="field-group" style="margin-top:12px">
+          <div class="field-label">NARRATIVE / DESCRIPTION</div>
+          <textarea class="field-input" id="f-justificationOther" rows="4" placeholder="Describe what the funds will be used for, any specific activities, events, deliverables, etc." style="resize:vertical;width:100%">${STATE.justificationOther||''}</textarea>
+        </div>
+      </div>`;
+    },
+    save(){
+      STATE.needsJustification=v('needsJustification');
+      if(STATE.needsJustification==='yes'){
+        const cats=['Personnel/Salaries','Fringe Benefits','Travel','Equipment','Supplies','Contractual/Consultants','Construction','Other Direct Costs'];
+        STATE.justificationItems=cats.map(cat=>{
+          const key=cat.replace(/\W/g,'');
+          const cb=document.getElementById('jc-'+key);
+          const am=document.getElementById('ja-'+key);
+          return {cat,checked:cb&&cb.checked,amount:am?am.value:''};
+        }).filter(x=>x.checked);
+        STATE.justificationOther=document.getElementById('f-justificationOther')?.value||'';
+      }
+    },
+    validate(){ return true; }
+  },
+  {
+    id:'confirm',
+    label:'FINAL REVIEW',
+    progress:95,
+    text:"We're almost there! Review everything below. By proceeding, you confirm that you are duly authorized by your organization to submit payment requests, and that all information provided is accurate to the best of your knowledge.",
+    render(){
+      const pType=computePaymentType();
+      return `
+      <div class="report-section">
+        <div class="report-section-title">CERTIFYING OFFICIAL</div>
+        <div class="report-row"><span class="report-key">NAME</span><span class="report-val">${STATE.firstName} ${STATE.lastName}</span></div>
+        <div class="report-row"><span class="report-key">TITLE</span><span class="report-val">${STATE.title}</span></div>
+        <div class="report-row"><span class="report-key">EMAIL</span><span class="report-val">${STATE.email}</span></div>
+        <div class="report-row"><span class="report-key">ORGANIZATION</span><span class="report-val">${STATE.orgName}</span></div>
+      </div>
+      <div class="report-section">
+        <div class="report-section-title">AWARD</div>
+        <div class="report-row"><span class="report-key">AGENCY</span><span class="report-val">${STATE.agency}</span></div>
+        <div class="report-row"><span class="report-key">FAIN</span><span class="report-val">${STATE.fain}</span></div>
+        <div class="report-row"><span class="report-key">PAYMENT #</span><span class="report-val">${STATE.paymentNum} (${STATE.paymentFinal})</span></div>
+        <div class="report-row"><span class="report-key">ACCOUNTING</span><span class="report-val">${STATE.accountingBasis}-BASED</span></div>
+      </div>
+      <div class="report-section">
+        <div class="report-section-title">PERIOD & TYPE</div>
+        <div class="report-row"><span class="report-key">PERIOD</span><span class="report-val">${fmtDate(STATE.periodStart)} → ${fmtDate(STATE.periodEnd)}</span></div>
+        <div class="report-row"><span class="report-key">AS-OF DATE</span><span class="report-val">${fmtDate(STATE.asOfDate)}</span></div>
+        <div class="report-row"><span class="report-key">PAYMENT TYPE</span><span class="report-val">${pType?pType.label:'UNKNOWN'}</span></div>
+      </div>
+      <div class="report-section">
+        <div class="report-section-title">SECTION 11 CALCULATIONS</div>
+        <div class="report-row"><span class="report-key">11a TOTAL OUTLAYS</span><span class="report-val">${fmt(parseFloat(STATE.allOutlays)||0)}</span></div>
+        <div class="report-row"><span class="report-key">11b PROGRAM INCOME</span><span class="report-val">${fmt(parseFloat(STATE.programIncome)||0)}</span></div>
+        <div class="report-row"><span class="report-key">11c NET OUTLAYS</span><span class="report-val">${fmt(STATE.c11c)}</span></div>
+        <div class="report-row"><span class="report-key">11d ADVANCE</span><span class="report-val">${fmt(parseFloat(STATE.advanceAmount)||0)}</span></div>
+        <div class="report-row"><span class="report-key">11e TOTAL</span><span class="report-val">${fmt(STATE.c11e)}</span></div>
+        <div class="report-row"><span class="report-key">11f COST SHARE</span><span class="report-val">${fmt(parseFloat(STATE.costShare)||0)}</span></div>
+        <div class="report-row"><span class="report-key">11g FEDERAL SHARE</span><span class="report-val">${fmt(STATE.c11g)}</span></div>
+        <div class="report-row"><span class="report-key">11h PREVIOUSLY RECEIVED</span><span class="report-val">${fmt(parseFloat(STATE.pastAmount)||0)}</span></div>
+        <div class="report-row" style="font-weight:700"><span class="report-key">11i AMOUNT REQUESTED</span><span class="report-val" style="color:#00FF41">${fmt(STATE.c11i)}</span></div>
+      </div>
+      ${STATE.needsJustification==='yes'&&STATE.justificationItems.length>0?`
+      <div class="report-section">
+        <div class="report-section-title">JUSTIFICATION</div>
+        ${STATE.justificationItems.map(i=>`<div class="report-row"><span class="report-key">${i.cat}</span><span class="report-val">${i.amount?fmt(parseFloat(i.amount)):''}</span></div>`).join('')}
+        ${STATE.justificationOther?`<div class="justification-text">${STATE.justificationOther}</div>`:''}
+      </div>`:''}
+      <div class="info-box warn" style="margin-top:16px">
+        ⚠ FINAL DISCLAIMER: This wizard output is for educational purposes only. It does not constitute financial or legal advice. You are solely responsible for verifying the accuracy of all information. The certifying official on the SF-270 attests under penalty of law to the accuracy of the submission. Verify all figures with your accounting system and grants management team before submitting.
+      </div>`;
+    },
+    save(){},
+    validate(){ return true; }
+  }
+];
+
+// ══════════════════════════════════════════════
+// Helpers
+// ══════════════════════════════════════════════
+function v(key){ const el=document.getElementById('f-'+key); return el?el.value:''; }
+function fmt(n){ if(isNaN(n))return '$—'; return '$'+Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtDate(d){ if(!d)return '—'; return new Date(d+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); }
+
+function computePaymentType(){
+  if(!STATE.periodStart||!STATE.periodEnd||!STATE.asOfDate) return null;
+  const s=new Date(STATE.periodStart),e=new Date(STATE.periodEnd),a=new Date(STATE.asOfDate);
+  if(a<s) return {type:'ADVANCE',label:'ADVANCE',cls:'ok',desc:'As-of date is before period start. Your entire request is an advance of funds.'};
+  if(a>e) return {type:'REIMBURSEMENT',label:'REIMBURSEMENT',cls:'ok',desc:'As-of date is after period end. This is a reimbursement for funds already spent.'};
+  return {type:'COMBO',label:'ADVANCE + REIMBURSEMENT',cls:'ok',desc:'As-of date falls within the period. Part reimbursement, part advance. Section 11 applies.'};
+}
+
+// Toggle helpers called from inline onchange
+window.renderInfo = function(val){
+  STATE.accountingBasis=val;
+  const step=STEPS[currentStep];
+  if(step.id==='accounting'){
+    document.getElementById('input-area').innerHTML=step.render();
+  }
+};
+window.refreshTypeDetect = function(){
+  STATE.periodStart=v('periodStart')||STATE.periodStart;
+  STATE.periodEnd=v('periodEnd')||STATE.periodEnd;
+  STATE.asOfDate=v('asOfDate')||STATE.asOfDate;
+  const pType=computePaymentType();
+  const el=document.getElementById('type-detect');
+  if(el) el.innerHTML=pType?`<div class="info-box ${pType.cls}">📡 PAYMENT TYPE DETECTED: <strong>${pType.label}</strong><br>${pType.desc}</div>`:'';
+};
+window.togglePI = function(val){
+  document.getElementById('pi-section').style.display=val==='yes'?'block':'none';
+  document.getElementById('pi-unknown').style.display=val==='unknown'?'block':'none';
+};
+window.toggleCS = function(val){
+  document.getElementById('cs-section').style.display=val==='yes'?'block':'none';
+  document.getElementById('cs-unknown').style.display=val==='unknown'?'block':'none';
+};
+window.toggleReceived = function(val){
+  document.getElementById('received-section').style.display=val==='yes'?'block':'none';
+};
+window.toggleJust = function(val){
+  document.getElementById('just-section').style.display=val==='yes'?'block':'none';
+};
+
+// ══════════════════════════════════════════════
+// Step navigation
+// ══════════════════════════════════════════════
+function renderStep(){
+  const step=STEPS[currentStep];
+  const total=STEPS.length;
+  document.getElementById('step-label').textContent=`STEP ${currentStep+1} OF ${total}`;
+  document.getElementById('progress-label').textContent=step.label;
+  document.getElementById('progress-fill').style.width=step.progress+'%';
+  document.getElementById('wizard-portrait').innerHTML=eJoeSVG(160);
+  const textEl=document.getElementById('wizard-text');
+  typeText(textEl,step.text,12);
+  document.getElementById('input-area').innerHTML=step.render();
+  document.getElementById('btn-back').style.display=currentStep===0?'none':'inline-block';
+  const isLast=currentStep===STEPS.length-1;
+  document.getElementById('btn-next').textContent=isLast?'[ GENERATE REPORT ]':'[ CONTINUE ]';
+}
+
+function nextStep(){
+  const step=STEPS[currentStep];
+  if(step.save) step.save();
+  if(step.validate&&!step.validate()){
+    const msg=step.blockMessage?step.blockMessage():'Please complete all required fields before continuing.';
+    alert('eJoe says: '+msg); return;
+  }
+  if(currentStep<STEPS.length-1){ currentStep++; renderStep(); }
+  else{ generateReport(); }
+}
+
+function prevStep(){
+  const step=STEPS[currentStep];
+  if(step.save) step.save();
+  if(currentStep>0){ currentStep--; renderStep(); }
+}
+
+// ══════════════════════════════════════════════
+// Report generation
+// ══════════════════════════════════════════════
+function generateReport(){
+  showScreen('screen-report');
+  const pType=computePaymentType();
+  document.getElementById('report-area').innerHTML=`
+    <div style="text-align:center;margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid rgba(0,255,65,0.2)">
+      <div style="font-size:10px;letter-spacing:0.2em;opacity:0.5;margin-bottom:8px">MISSION COMPLETE :: SF-270 FIELD DATA</div>
+      <div style="font-size:24px;font-weight:700;letter-spacing:0.1em;text-shadow:0 0 16px rgba(0,255,65,0.5)">eJoe</div>
+      <div style="font-size:11px;opacity:0.5;margin-top:4px">Generated: ${new Date().toLocaleString()}</div>
+    </div>
+    ${STEPS[STEPS.length-1].render()}
+    <div style="text-align:center;padding:24px 0;opacity:0.4;font-size:11px;border-top:1px solid rgba(0,255,65,0.2);margin-top:16px">
+      eJoe SF-270 Wizard :: For educational purposes only :: OMB 4040-0012
+    </div>`;
+}
+
+// ══════════════════════════════════════════════
+// Export
+// ══════════════════════════════════════════════
+window.exportReport = async function(){
+  const btn = document.querySelector('#screen-report .btn');
+  if(btn){ btn.textContent='[ GENERATING PDF... ]'; btn.disabled=true; }
+
+  const pType = computePaymentType();
+
+  try {
+    // Fetch the fillable PDF from the same repo
+    const pdfBytes = await fetch('SF270_fillable-Copy.pdf').then(r => {
+      if(!r.ok) throw new Error('Could not load SF270_fillable-Copy.pdf (status '+r.status+')');
+      return r.arrayBuffer();
+    });
+
+    const { PDFDocument } = PDFLib;
+    const pdfDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+    const form   = pdfDoc.getForm();
+
+    function setText(name, value){
+      try{ form.getTextField(name).setText(value||''); }catch(e){}
+    }
+    function setCheck(name, checked){
+      try{ checked ? form.getCheckBox(name).check() : form.getCheckBox(name).uncheck(); }catch(e){}
+    }
+
+    // ── Checkboxes ──
+    setCheck('advance_cb',        pType&&(pType.type==='ADVANCE'||pType.type==='COMBO'));
+    setCheck('reimbursement_cb',  pType&&(pType.type==='REIMBURSEMENT'||pType.type==='COMBO'));
+    setCheck('final_cb',          STATE.paymentFinal==='FINAL');
+    setCheck('partial_cb',        STATE.paymentFinal==='PARTIAL');
+    setCheck('cash_cb',           STATE.accountingBasis==='CASH');
+    setCheck('accrual_cb',        STATE.accountingBasis==='ACCRUAL');
+
+    // ── Page 1 ──
+    setText('fed_sponsoring_agency',   STATE.agency);
+    setText('fed_grant_number',        STATE.fain);
+    setText('employer_id_number',      STATE.employerId);
+    setText('partial_payment_req_num', STATE.paymentNum);
+    setText('period_from',             fmtDate(STATE.periodStart));
+    setText('period_to',               fmtDate(STATE.periodEnd));
+    setText('recip_name',              STATE.orgName);
+    setText('recip_street1',           STATE.street1);
+    setText('recip_street2',           STATE.street2);
+    setText('recip_city',              STATE.city);
+    setText('recip_state',             STATE.state);
+    setText('recip_zip',               STATE.zip);
+
+    // ── Page 2 — Section 11 ──
+    setText('asof_date',  fmtDate(STATE.asOfDate));
+    const a = fmt(parseFloat(STATE.allOutlays)||0);
+    const b = fmt(parseFloat(STATE.programIncome)||0);
+    const c = fmt(STATE.c11c);
+    const d = fmt(parseFloat(STATE.advanceAmount)||0);
+    const e = fmt(STATE.c11e);
+    const f = fmt(parseFloat(STATE.costShare)||0);
+    const g = fmt(STATE.c11g);
+    const h = fmt(parseFloat(STATE.pastAmount)||0);
+    const i = fmt(STATE.c11i);
+
+    setText('row_a_1',a); setText('row_a_T',a);
+    setText('row_b_1',b); setText('row_b_T',b);
+    setText('row_c_1',c); setText('row_c_T',c);
+    setText('row_d_1',d); setText('row_d_T',d);
+    setText('row_e_1',e); setText('row_e_T',e);
+    setText('row_f_1',f); setText('row_f_T',f);
+    setText('row_g_1',g); setText('row_g_T',g);
+    setText('row_h_1',h); setText('row_h_T',h);
+    setText('row_i_1',i); setText('row_i_T',i);
+
+    // ── Certification ──
+    setText('first_name',     STATE.firstName);
+    setText('last_name',      STATE.lastName);
+    setText('title',          STATE.title);
+    setText('telephone',      STATE.phone);
+    setText('date_submitted', fmtDate(new Date().toISOString().slice(0,10)));
+    setText('signature',      STATE.firstName+' '+STATE.lastName);
+
+    // Flatten so values are baked in
+    form.flatten();
+
+    const filledBytes = await pdfDoc.save();
+    const blob = new Blob([filledBytes], { type:'application/pdf' });
+    const url  = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href     = url;
+    link.download = 'SF270_'+STATE.orgName.replace(/\W+/g,'_')+'_'+new Date().toISOString().slice(0,10)+'.pdf';
+    link.click();
+    setTimeout(()=>URL.revokeObjectURL(url), 5000);
+
+    if(btn){ btn.textContent='[ ✓ PDF DOWNLOADED ]'; btn.disabled=false; }
+
+  } catch(err) {
+    console.error(err);
+    if(btn){ btn.textContent='[ EXPORT FIELD DATA ]'; btn.disabled=false; }
+    alert('eJoe Error: '+err.message+'\n\nMake sure SF270_fillable-Copy.pdf is in the same GitHub repo folder.');
+  }
+};
+
+// ══════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════
+window.addEventListener('DOMContentLoaded',()=>{
+  document.getElementById('intro-portrait').innerHTML=eJoeSVG(140);
+  const el=document.getElementById('intro-text');
+  setTimeout(()=>{
+    typeText(el,"WHO DARES DISTURB eJoe...?\n\nDo you wish to learn the ancient secrets\nof the SF-270 Payment Request Form?",20);
+  },400);
+});
+</script>
+</body>
+</html>
