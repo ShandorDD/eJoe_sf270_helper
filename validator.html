@@ -1,0 +1,1364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SF-270 Validator · eJoe QC Tool v1.1.0</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+  <!-- PDF.js for rendering PDF pages to canvas -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <!-- Tesseract.js for OCR -->
+  <script src="https://unpkg.com/tesseract.js@5.0.4/dist/tesseract.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { height: 100%; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: #F4F6F9; color: #1A1F2E; }
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-thumb { background: #D0D8E8; border-radius: 3px; }
+    .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+    .upload-zone:hover { border-color: #4A6FA5 !important; background: #EEF4FA !important; }
+    .expand-btn:hover { background: rgba(0,0,0,0.04) !important; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes scoreRing {
+      from { stroke-dashoffset: 283; }
+      to   { stroke-dashoffset: var(--target-offset); }
+    }
+    .ring-circle {
+      animation: scoreRing 1.2s cubic-bezier(0.4,0,0.2,1) forwards;
+      animation-delay: 0.3s;
+      stroke-dashoffset: 283;
+    }
+    .fade-in { animation: fadeIn 0.3s ease forwards; }
+    .ocr-field:focus { border-color: #4A6FA5 !important; outline: none; }
+    .ocr-field.uncertain { border-color: #D97706 !important; background: #FFFBEB !important; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useCallback, useRef, useEffect } = React;
+const VERSION = "1.1.0";
+
+// Set PDF.js worker
+if (typeof pdfjsLib !== 'undefined') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
+
+// ── Palette ──────────────────────────────────────────────────────────────────
+const C = {
+  bg:"#F4F6F9", navy:"#1B2A4A", slate:"#2E4166", mid:"#4A6FA5",
+  sky:"#7BA3D0", pale:"#EEF4FA", white:"#FFFFFF", ink:"#1A1F2E",
+  muted:"#6B7897", border:"#D0D8E8",
+  error:"#DC2626", errorBg:"#FEF2F2", errorBd:"#FECACA",
+  warn:"#D97706",  warnBg:"#FFFBEB",  warnBd:"#FDE68A",
+  ok:"#059669",    okBg:"#F0FDF4",    okBd:"#A7F3D0",
+  info:"#2563EB",  infoBg:"#EFF6FF",  infoBd:"#BFDBFE",
+};
+
+// ── SF-270 field definitions by page ─────────────────────────────────────────
+const FIELD_PAGES = {
+  1: [
+    { key:"advance_cb",          label:"Advance (Box 1a)",           type:"check" },
+    { key:"reimbursement_cb",    label:"Reimbursement (Box 1a)",     type:"check" },
+    { key:"final_cb",            label:"Final (Box 1b)",             type:"check" },
+    { key:"partial_cb",          label:"Partial (Box 1b)",           type:"check" },
+    { key:"cash_cb",             label:"Cash-Based (Box 2)",         type:"check" },
+    { key:"accrual_cb",          label:"Accrual-Based (Box 2)",      type:"check" },
+    { key:"fed_sponsoring_agency",label:"Federal Agency (Box 3)",    type:"text"  },
+    { key:"fed_grant_number",    label:"FAIN (Box 4)",               type:"text"  },
+    { key:"partial_payment_req_num",label:"Request # (Box 5)",       type:"text"  },
+    { key:"employer_id_number",  label:"Employer ID (Box 6)",        type:"text"  },
+    { key:"financial_assistance_id",label:"Financial Assist ID (Box 7)",type:"text"},
+    { key:"period_from",         label:"Period Start (Box 8)",       type:"text"  },
+    { key:"period_to",           label:"Period End (Box 8)",         type:"text"  },
+    { key:"recip_name",          label:"Recipient Org (Box 9)",      type:"text"  },
+    { key:"recip_street1",       label:"Street 1",                   type:"text"  },
+    { key:"recip_city",          label:"City",                       type:"text"  },
+    { key:"recip_state",         label:"State",                      type:"text"  },
+    { key:"recip_zip",           label:"ZIP",                        type:"text"  },
+    { key:"payee_name",          label:"Payee Name (Box 10)",        type:"text"  },
+  ],
+  2: [
+    { key:"asof_date",   label:"As-Of Date (Box 11a)",              type:"text" },
+    { key:"row_a_1",     label:"Total Outlays — Col A (11a)",       type:"money"},
+    { key:"row_a_T",     label:"Total Outlays — Total (11a)",       type:"money"},
+    { key:"row_b_1",     label:"Program Income — Col A (11b)",      type:"money"},
+    { key:"row_b_T",     label:"Program Income — Total (11b)",      type:"money"},
+    { key:"row_c_1",     label:"Net Outlays — Col A (11c)",         type:"money"},
+    { key:"row_c_T",     label:"Net Outlays — Total (11c)",         type:"money"},
+    { key:"row_d_1",     label:"Advance Needed — Col A (11d)",      type:"money"},
+    { key:"row_d_T",     label:"Advance Needed — Total (11d)",      type:"money"},
+    { key:"row_e_1",     label:"Total c+d — Col A (11e)",           type:"money"},
+    { key:"row_e_T",     label:"Total c+d — Total (11e)",           type:"money"},
+    { key:"row_f_1",     label:"Non-Fed Share — Col A (11f)",       type:"money"},
+    { key:"row_f_T",     label:"Non-Fed Share — Total (11f)",       type:"money"},
+    { key:"row_g_1",     label:"Federal Share — Col A (11g)",       type:"money"},
+    { key:"row_g_T",     label:"Federal Share — Total (11g)",       type:"money"},
+    { key:"row_h_1",     label:"Prev Received — Col A (11h)",       type:"money"},
+    { key:"row_h_T",     label:"Prev Received — Total (11h)",       type:"money"},
+    { key:"row_i_1",     label:"Fed Share Requested — Col A (11i)", type:"money"},
+    { key:"row_i_T",     label:"Fed Share Requested — Total (11i)", type:"money"},
+    { key:"alt_12a",     label:"Est. Cash Outlays (12a)",           type:"money"},
+    { key:"alt_12b",     label:"Cash Balance on Hand (12b)",        type:"money"},
+    { key:"alt_12c",     label:"Amount Requested (12c)",            type:"money"},
+    { key:"signature",   label:"Signature (Box 13)",                type:"text" },
+    { key:"date_submitted",label:"Date Submitted (Box 13)",         type:"text" },
+    { key:"prefix",      label:"Prefix",                            type:"text" },
+    { key:"first_name",  label:"First Name (Box 13)",               type:"text" },
+    { key:"last_name",   label:"Last Name (Box 13)",                type:"text" },
+    { key:"title",       label:"Title (Box 13)",                    type:"text" },
+    { key:"telephone",   label:"Phone (Box 13)",                    type:"text" },
+  ]
+};
+
+// ── PDF field extraction (standard fillable) ──────────────────────────────────
+async function extractFillableFields(arrayBuffer) {
+  const { PDFDocument } = PDFLib;
+  const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+  const form   = pdfDoc.getForm();
+  const fields = form.getFields();
+  const data   = {};
+  for (const field of fields) {
+    const name = field.getName();
+    const type = field.constructor.name;
+    try {
+      if (type === "PDFTextField")  data[name] = field.getText() || "";
+      else if (type === "PDFCheckBox") data[name] = field.isChecked();
+      else data[name] = null;
+    } catch { data[name] = null; }
+  }
+  return data;
+}
+
+// ── Field name mapping layer ──────────────────────────────────────────────────
+// Normalizes field names from any known SF-270 PDF variant into our
+// canonical internal field names used by the validator.
+//
+// Supported variants:
+//   "ejoe"    — SF270_fillable-Copy.pdf (our own fillable PDF)
+//   "gov97"   — Standard_form_270.pdf (OMB Rev. 7-97 from grants.gov/GSA)
+
+const FIELD_MAPS = {
+  // ── gov97 → canonical ──────────────────────────────────────────────────────
+  gov97: {
+    // Checkboxes — gov97 uses radio group arrays; we infer from group names
+    // pmta = payment type a (advance/reimbursement), pmtb = final/partial, reqb = cash/accrual
+    // These come through as child fields of groups — handled in detectVariant
+    'advance_cb':          ['pmta.0'],
+    'reimbursement_cb':    ['pmta.1'],
+    'final_cb':            ['pmtb.0'],
+    'partial_cb':          ['pmtb.1'],
+    'cash_cb':             ['reqb.0'],
+    'accrual_cb':          ['reqb.1'],
+    // Header fields
+    'fed_sponsoring_agency':   ['sponsor'],
+    'fed_grant_number':        ['award'],
+    'partial_payment_req_num': ['request_no'],
+    'employer_id_number':      ['ein', 'ein.'],
+    'financial_assistance_id': ['account'],
+    'period_from':             ['date.1'],
+    'period_to':               ['date.2'],
+    // Recipient (grouped)
+    'recip_name':    ['recipient.1'],
+    'recip_street1': ['recipient.2'],
+    'recip_city':    ['recipient.3'],
+    // Payee (grouped)
+    'payee_name':    ['payee.1'],
+    'payee_street1': ['payee.2'],
+    'payee_city':    ['payee.3'],
+    // Box 11 — columns a/b/c + total
+    'asof_date':  ['a.date', 'prog.1'],
+    'row_a_1':    ['a.1'],  'row_a_2': ['a.2'],  'row_a_3': ['a.3'],  'row_a_T': ['total.1'],
+    'row_b_1':    ['b.1'],  'row_b_2': ['b.2'],  'row_b_3': ['b.3'],  'row_b_T': ['total.2'],
+    'row_c_1':    ['c.1'],  'row_c_2': ['c.2'],  'row_c_3': ['c.3'],  'row_c_T': ['total.3'],
+    'row_d_1':    ['d.1'],  'row_d_2': ['d.2'],  'row_d_3': ['d.3'],  'row_d_T': ['totaladv.1'],
+    'row_e_1':    ['e.1'],  'row_e_2': ['e.2'],  'row_e_3': ['e.3'],  'row_e_T': ['total.4'],
+    'row_f_1':    ['f.1'],  'row_f_2': ['f.2'],  'row_f_3': ['f.3'],  'row_f_T': ['nfse'],
+    'row_g_1':    ['g.1'],  'row_g_2': ['g.2'],  'row_g_3': ['g.3'],  'row_g_T': ['fse'],
+    'row_h_1':    ['h.1'],  'row_h_2': ['h.2'],  'row_h_3': ['h.3'],  'row_h_T': ['pffr'],
+    'row_i_1':    ['j.1'],  'row_i_2': ['j.2'],  'row_i_3': ['j.3'],  'row_i_T': ['total.5'],
+    // Box 12
+    'alt_12a':  ['cash'],
+    'alt_12b':  ['balance'],
+    'alt_12c':  ['send'],
+    // Box 13 certification
+    'first_name':     ['name'],
+    'last_name':      ['name'],   // gov97 has single name field
+    'title':          ['requested'],
+    'telephone':      ['phone'],
+    'date_submitted': ['Today'],
+    'signature':      ['name'],
+  },
+};
+
+// Detect which variant a raw field dict belongs to
+function detectVariant(raw) {
+  const keys = Object.keys(raw);
+  if (keys.includes('sponsor') || keys.includes('award') || keys.includes('request_no')) return 'gov97';
+  if (keys.includes('fed_sponsoring_agency') || keys.includes('fed_grant_number'))       return 'ejoe';
+  // Fallback: count key patterns
+  const gov97Hits = ['sponsor','award','ein','account','recipient.1','payee.1','nfse','fse'].filter(k => keys.includes(k)).length;
+  const ejoeHits  = ['fed_sponsoring_agency','recip_name','row_a_1','row_a_T','alt_12a'].filter(k => keys.includes(k)).length;
+  if (gov97Hits > ejoeHits) return 'gov97';
+  return 'ejoe'; // default — our own fillable
+}
+
+// Normalize raw field dict → canonical field names
+function normalizeFields(raw) {
+  const variant = detectVariant(raw);
+  if (variant === 'ejoe') return { ...raw, _variant: 'ejoe' }; // already canonical
+
+  const map = FIELD_MAPS[variant] || {};
+  const out = { _variant: variant };
+
+  // Copy unmapped fields as-is
+  Object.keys(raw).forEach(k => { out[k] = raw[k]; });
+
+  // Apply mapping: canonical ← first source key that has a value
+  Object.entries(map).forEach(([canonical, sources]) => {
+    for (const src of sources) {
+      const val = raw[src];
+      if (val !== undefined && val !== null && val !== '') {
+        out[canonical] = val;
+        break;
+      }
+    }
+    // If still not set, leave it undefined (validator treats as blank)
+  });
+
+  // gov97 special: infer checkboxes from radio group child values
+  // Radio groups appear as "pmta.0" / "pmta.1" etc — if they are "On" or checked
+  if (variant === 'gov97') {
+    out.advance_cb       = raw['pmta.0'] === 'On' || raw['pmta.0'] === true;
+    out.reimbursement_cb = raw['pmta.1'] === 'On' || raw['pmta.1'] === true;
+    out.final_cb         = raw['pmtb.0'] === 'On' || raw['pmtb.0'] === true;
+    out.partial_cb       = raw['pmtb.1'] === 'On' || raw['pmtb.1'] === true;
+    out.cash_cb          = raw['reqb.0'] === 'On' || raw['reqb.0'] === true;
+    out.accrual_cb       = raw['reqb.1'] === 'On' || raw['reqb.1'] === true;
+    // gov97 has a single 'name' field for the certifier — split heuristically
+    if (raw['name']) {
+      const parts = (raw['name'] || '').trim().split(/\s+/);
+      out.first_name = parts[0] || '';
+      out.last_name  = parts.slice(1).join(' ') || '';
+    }
+    // Map asof date — it's nested inside group 'a' in gov97
+    if (!out.asof_date && raw['a.1']) out.asof_date = ''; // date is separate cell
+  }
+
+  return out;
+}
+
+// ── Detect PDF type ───────────────────────────────────────────────────────────
+async function detectPDFType(arrayBuffer) {
+  try {
+    const { PDFDocument } = PDFLib;
+    const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+    const form   = pdfDoc.getForm();
+    const fields = form.getFields();
+
+    // Check for XFA
+    const catalog = pdfDoc.catalog;
+    let isXFA = false;
+    try {
+      const acroForm = catalog.lookup(PDFLib.PDFName.of('AcroForm'));
+      if (acroForm) {
+        const xfa = acroForm.lookup(PDFLib.PDFName.of('XFA'));
+        if (xfa) isXFA = true;
+      }
+    } catch {}
+
+    if (isXFA) return { type: "xfa", fieldCount: 0 };
+    if (fields.length === 0) return { type: "flat", fieldCount: 0 };
+
+    // Count populated fields
+    let populated = 0;
+    for (const field of fields) {
+      try {
+        const ft = field.constructor.name;
+        if (ft === "PDFTextField" && field.getText()?.trim()) populated++;
+        if (ft === "PDFCheckBox"  && field.isChecked()) populated++;
+      } catch {}
+    }
+
+    return { type: "fillable", fieldCount: fields.length, populated };
+  } catch(e) {
+    return { type: "error", error: e.message };
+  }
+}
+
+// ── Render PDF page to canvas via PDF.js ──────────────────────────────────────
+async function renderPageToCanvas(arrayBuffer, pageNum, canvas, scale = 1.5) {
+  const uint8 = new Uint8Array(arrayBuffer);
+  const pdf   = await pdfjsLib.getDocument({ data: uint8 }).promise;
+  const page  = await pdf.getPage(pageNum);
+  const vp    = page.getViewport({ scale });
+  canvas.width  = vp.width;
+  canvas.height = vp.height;
+  await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+  return pdf.numPages;
+}
+
+// ── OCR a canvas with Tesseract ───────────────────────────────────────────────
+async function ocrCanvas(canvas, onProgress) {
+  const worker = await Tesseract.createWorker('eng', 1, {
+    logger: m => {
+      if (m.status === 'recognizing text' && onProgress) {
+        onProgress(Math.round(m.progress * 100));
+      }
+    }
+  });
+  const { data } = await worker.recognize(canvas);
+  await worker.terminate();
+  return data;
+}
+
+// ── Parse OCR text into SF-270 fields ────────────────────────────────────────
+function parseOCRToFields(text, pageNum) {
+  const fields = {};
+  const lines  = text.split('\n').map(l => l.trim()).filter(Boolean);
+
+  // Money pattern
+  const money = str => {
+    const m = str.match(/\$?\s*([\d,]+\.?\d{0,2})/);
+    return m ? m[1].replace(/,/g,'') : '';
+  };
+
+  // Date pattern
+  const dateP = str => {
+    const m = str.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/);
+    if (m) return m[1];
+    const m2 = str.match(/(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}/i);
+    return m2 ? m2[0] : '';
+  };
+
+  if (pageNum === 1) {
+    // Checkboxes — look for X or check marks near keywords
+    const fullText = text.toUpperCase();
+    fields.advance_cb       = /ADVANCE/.test(fullText) && /[X✓√].*ADVANCE|ADVANCE.*[X✓√]/i.test(text);
+    fields.reimbursement_cb = /[X✓√].*REIMB|REIMB.*[X✓√]/i.test(text);
+    fields.final_cb         = /[X✓√].*FINAL|FINAL.*[X✓√]/i.test(text);
+    fields.partial_cb       = /[X✓√].*PARTIAL|PARTIAL.*[X✓√]/i.test(text);
+    fields.cash_cb          = /[X✓√].*CASH|CASH.*[X✓√]/i.test(text);
+    fields.accrual_cb       = /[X✓√].*ACCRUAL|ACCRUAL.*[X✓√]/i.test(text);
+
+    // Extract text fields by proximity to labels
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i];
+      const next = lines[i+1] || '';
+      if (/grant.*number|fain|identifying number/i.test(l))   fields.fed_grant_number = next;
+      if (/sponsoring agency|element/i.test(l))               fields.fed_sponsoring_agency = next;
+      if (/employer.*id|ein/i.test(l))                        fields.employer_id_number = next;
+      if (/financial.*assist/i.test(l))                       fields.financial_assistance_id = next;
+      if (/partial.*payment.*request|request.*number/i.test(l)) fields.partial_payment_req_num = next;
+      if (/recipient.*org|name.*org/i.test(l))                fields.recip_name = next;
+      if (/^name:/i.test(l))                                  fields.recip_name = l.replace(/^name:\s*/i,'');
+      if (/^street\s*1/i.test(l))                             fields.recip_street1 = next;
+      if (/^city/i.test(l))                                   fields.recip_city = next;
+      if (/^state/i.test(l))                                  fields.recip_state = next;
+      if (/zip.*postal/i.test(l))                             fields.recip_zip = next;
+      if (/period.*covered|from:/i.test(l)) {
+        const d = dateP(l + ' ' + next);
+        if (d) fields.period_from = d;
+      }
+      if (/\bto:/i.test(l)) {
+        const d = dateP(l + ' ' + next);
+        if (d) fields.period_to = d;
+      }
+    }
+  }
+
+  if (pageNum === 2) {
+    for (let i = 0; i < lines.length; i++) {
+      const l    = lines[i];
+      const next = lines[i+1] || '';
+      if (/as.of.date/i.test(l))                              fields.asof_date = dateP(l + ' ' + next) || next;
+      if (/total.*program.*outlay|outlay.*date/i.test(l))     fields.row_a_T = money(next);
+      if (/less.*cumulative|program.*income/i.test(l))        fields.row_b_T = money(next);
+      if (/net.*program.*outlay/i.test(l))                    fields.row_c_T = money(next);
+      if (/estimated.*net.*cash|advance.*period/i.test(l))    fields.row_d_T = money(next);
+      if (/sum.*lines.*c.*d|\btotal\b.*\be\b/i.test(l))      fields.row_e_T = money(next);
+      if (/non.*federal.*share/i.test(l))                     fields.row_f_T = money(next);
+      if (/federal.*share.*amount.*line.*e/i.test(l))         fields.row_g_T = money(next);
+      if (/federal.*payments.*prev/i.test(l))                 fields.row_h_T = money(next);
+      if (/federal.*share.*now|line.*g.*minus/i.test(l))      fields.row_i_T = money(next);
+      if (/estimated.*federal.*cash.*outlay/i.test(l))        fields.alt_12a = money(next);
+      if (/estimated.*balance|cash.*on.*hand/i.test(l))       fields.alt_12b = money(next);
+      if (/amount.*requested.*line.*a.*minus/i.test(l))       fields.alt_12c = money(next);
+      if (/first.*name/i.test(l))                             fields.first_name = next;
+      if (/last.*name/i.test(l))                              fields.last_name = next;
+      if (/\btitle\b/i.test(l))                               fields.title = next;
+      if (/telephone.*area/i.test(l))                         fields.telephone = next;
+      if (/date.*request.*submitted|date.*submitted/i.test(l)) fields.date_submitted = dateP(l + ' ' + next) || next;
+    }
+    // Mirror totals to col A if blank
+    ['a','b','c','d','e','f','g','h','i'].forEach(r => {
+      if (!fields[`row_${r}_1`] && fields[`row_${r}_T`]) {
+        fields[`row_${r}_1`] = fields[`row_${r}_T`];
+      }
+    });
+  }
+
+  return fields;
+}
+
+// ── Validation engine ─────────────────────────────────────────────────────────
+function parseMoney(str) {
+  if (!str || str === '—' || str === '$—') return null;
+  const n = parseFloat(String(str).replace(/[$,\s]/g,''));
+  return isNaN(n) ? null : n;
+}
+function parseDate(str) {
+  if (!str || str === '—') return null;
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? null : d;
+}
+function approxEqual(a, b, tol = 0.02) {
+  if (a === null || b === null) return null;
+  return Math.abs(a - b) <= tol;
+}
+function fmt(n) {
+  if (n === null || n === undefined || isNaN(n)) return '—';
+  return '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 });
+}
+
+function validate(d) {
+  const checks = [];
+  function add(id, category, severity, box, title, detail, pass) {
+    checks.push({ id, category, severity, box, title, detail, pass });
+  }
+
+  const periodFrom = parseDate(d.period_from);
+  const periodTo   = parseDate(d.period_to);
+  const asOfDate   = parseDate(d.asof_date || d.asOf_date);
+  const dateSubmit = parseDate(d.date_submitted);
+
+  const isAdvance  = d.advance_cb       === true;
+  const isReimb    = d.reimbursement_cb === true;
+  const isFinal    = d.final_cb         === true;
+  const isPartial  = d.partial_cb       === true;
+  const isCash     = d.cash_cb          === true;
+  const isAccrual  = d.accrual_cb       === true;
+
+  const a11a = parseMoney(d.row_a_1 || d.row_a_T);
+  const a11b = parseMoney(d.row_b_1 || d.row_b_T);
+  const a11c = parseMoney(d.row_c_1 || d.row_c_T);
+  const a11d = parseMoney(d.row_d_1 || d.row_d_T);
+  const a11e = parseMoney(d.row_e_1 || d.row_e_T);
+  const a11f = parseMoney(d.row_f_1 || d.row_f_T);
+  const a11g = parseMoney(d.row_g_1 || d.row_g_T);
+  const a11h = parseMoney(d.row_h_1 || d.row_h_T);
+  const a11i = parseMoney(d.row_i_1 || d.row_i_T);
+  const a12a = parseMoney(d.alt_12a);
+  const a12b = parseMoney(d.alt_12b);
+  const a12c = parseMoney(d.alt_12c);
+
+  const recipName = d.recip_name || '';
+  const fain      = d.fed_grant_number || '';
+  const agency    = d.fed_sponsoring_agency || '';
+  const firstName = d.first_name || '';
+  const lastName  = d.last_name  || '';
+  const title     = d.title      || '';
+  const phone     = d.telephone  || '';
+
+  // Required
+  add('A1','Required Fields','ERROR','Box 9','Recipient organization name',
+    recipName.trim() ? `"${recipName}"` : 'Recipient name is blank — required.',
+    recipName.trim().length > 0);
+  add('A2','Required Fields','ERROR','Box 4','Federal Award Identifier (FAIN)',
+    fain.trim() ? `"${fain}"` : 'FAIN is blank — required.',
+    fain.trim().length > 0);
+  add('A3','Required Fields','ERROR','Box 3','Federal sponsoring agency',
+    agency.trim() ? `"${agency}"` : 'Agency is blank — required.',
+    agency.trim().length > 0);
+  add('A4','Required Fields','ERROR','Box 8','Period start date',
+    periodFrom ? periodFrom.toLocaleDateString() : 'Blank or unreadable.',
+    periodFrom !== null);
+  add('A5','Required Fields','ERROR','Box 8','Period end date',
+    periodTo ? periodTo.toLocaleDateString() : 'Blank or unreadable.',
+    periodTo !== null);
+  add('A6','Required Fields','ERROR','Box 13','Certifier first name',
+    firstName.trim() ? `"${firstName}"` : 'Blank — required.',
+    firstName.trim().length > 0);
+  add('A7','Required Fields','ERROR','Box 13','Certifier last name',
+    lastName.trim() ? `"${lastName}"` : 'Blank — required.',
+    lastName.trim().length > 0);
+  add('A8','Required Fields','WARN','Box 13','Certifier title',
+    title.trim() ? `"${title}"` : 'Blank — recommended.',
+    title.trim().length > 0);
+  add('A9','Required Fields','WARN','Box 13','Phone number',
+    phone.trim() ? `"${phone}"` : 'Blank — recommended.',
+    phone.trim().length > 0);
+
+  // Date logic
+  if (periodFrom && periodTo) {
+    add('B1','Date Logic','ERROR','Box 8','Period start is before period end',
+      periodFrom < periodTo
+        ? `${periodFrom.toLocaleDateString()} → ${periodTo.toLocaleDateString()} ✓`
+        : `Start (${periodFrom.toLocaleDateString()}) is on or after end (${periodTo.toLocaleDateString()}).`,
+      periodFrom < periodTo);
+  }
+  if (periodFrom && periodTo && asOfDate) {
+    const expAdv   = asOfDate < periodFrom;
+    const expReim  = asOfDate > periodTo;
+    const expCombo = !expAdv && !expReim;
+    let correct = false, detail = '';
+    if (expAdv) {
+      correct = isAdvance && !isReimb;
+      detail  = correct
+        ? `As-of (${asOfDate.toLocaleDateString()}) before period start → Advance ✓`
+        : `As-of (${asOfDate.toLocaleDateString()}) before period start → should be Advance only. Form marks: ${isAdvance?'Advance ':''}${isReimb?'Reimbursement':'(none)'}.`;
+    } else if (expReim) {
+      correct = !isAdvance && isReimb;
+      detail  = correct
+        ? `As-of (${asOfDate.toLocaleDateString()}) after period end → Reimbursement ✓`
+        : `As-of (${asOfDate.toLocaleDateString()}) after period end → should be Reimbursement only. Form marks: ${isAdvance?'Advance ':''}${isReimb?'Reimbursement':'(none)'}.`;
+    } else {
+      correct = isAdvance && isReimb;
+      detail  = correct
+        ? `As-of (${asOfDate.toLocaleDateString()}) within period → Advance + Reimbursement ✓`
+        : `As-of (${asOfDate.toLocaleDateString()}) within period → should mark both Advance and Reimbursement. Form marks: ${isAdvance?'Advance ':''}${isReimb?'Reimbursement':'(none)'}.`;
+    }
+    add('B2','Date Logic','ERROR','Box 1a','Payment type matches as-of date', detail, correct);
+  }
+  if (dateSubmit && asOfDate) {
+    const diff = Math.round((dateSubmit - asOfDate)/(1000*60*60*24));
+    add('B4','Date Logic','WARN','Box 13','Submission date not before as-of date',
+      dateSubmit >= asOfDate ? `Submitted ${diff} day(s) after as-of date ✓`
+        : `Submission (${dateSubmit.toLocaleDateString()}) is before as-of date (${asOfDate.toLocaleDateString()}).`,
+      dateSubmit >= asOfDate);
+  }
+
+  // Box 1/2
+  add('C1','Payment Type & Basis','ERROR','Box 1a','Payment type selected',
+    (isAdvance||isReimb) ? `${isAdvance?'Advance ':''}${isReimb?'Reimbursement':''}` : 'Neither checked.',
+    isAdvance||isReimb);
+  add('C2','Payment Type & Basis','ERROR','Box 1b','Final or Partial selected',
+    (isFinal||isPartial) ? (isFinal?'Final':'Partial') : 'Neither checked.',
+    isFinal||isPartial);
+  add('C3','Payment Type & Basis','ERROR','Box 2','Accounting basis selected',
+    (isCash||isAccrual) ? (isCash?'Cash-Based':'Accrual-Based') : 'Neither checked.',
+    isCash||isAccrual);
+
+  // Math
+  const has11 = a11a !== null || a11i !== null;
+  const has12 = a12a !== null || a12c !== null;
+
+  if (has11 && has12 && a11i > 0 && a12c > 0) {
+    add('D0','Section 11 Math','ERROR','11 / 12','Only one section should be completed',
+      'Both sections have values — complete only one.', false);
+  }
+  if (has11) {
+    if (a11a!==null && a11b!==null && a11c!==null) {
+      const exp = a11a-a11b;
+      add('D1','Section 11 Math','ERROR','11c','11c = 11a − 11b',
+        approxEqual(exp,a11c) ? `${fmt(a11a)} − ${fmt(a11b)} = ${fmt(exp)} ✓`
+          : `Expected ${fmt(exp)}, form shows ${fmt(a11c)}.`,
+        approxEqual(exp,a11c)===true);
+    }
+    if (a11c!==null && a11d!==null && a11e!==null) {
+      const exp = a11c+a11d;
+      add('D2','Section 11 Math','ERROR','11e','11e = 11c + 11d',
+        approxEqual(exp,a11e) ? `${fmt(a11c)} + ${fmt(a11d)} = ${fmt(exp)} ✓`
+          : `Expected ${fmt(exp)}, form shows ${fmt(a11e)}.`,
+        approxEqual(exp,a11e)===true);
+    }
+    if (a11e!==null && a11f!==null && a11g!==null) {
+      const exp = a11e-a11f;
+      add('D3','Section 11 Math','ERROR','11g','11g = 11e − 11f',
+        approxEqual(exp,a11g) ? `${fmt(a11e)} − ${fmt(a11f)} = ${fmt(exp)} ✓`
+          : `Expected ${fmt(exp)}, form shows ${fmt(a11g)}.`,
+        approxEqual(exp,a11g)===true);
+    }
+    if (a11g!==null && a11h!==null && a11i!==null) {
+      const exp = a11g-a11h;
+      add('D4','Section 11 Math','ERROR','11i','11i = 11g − 11h',
+        approxEqual(exp,a11i) ? `${fmt(a11g)} − ${fmt(a11h)} = ${fmt(exp)} ✓`
+          : `Expected ${fmt(exp)}, form shows ${fmt(a11i)}.`,
+        approxEqual(exp,a11i)===true);
+    }
+    if (a11i!==null) {
+      add('D5','Section 11 Math','ERROR','11i','11i is not negative',
+        a11i>=0 ? `${fmt(a11i)} ✓` : `${fmt(a11i)} — negative is invalid.`, a11i>=0);
+    }
+    if (a11d!==null && a11d>0 && isReimb && !isAdvance) {
+      add('D6','Section 11 Math','WARN','11d','Advance amount present but type is Reimbursement only',
+        `11d = ${fmt(a11d)} but form is Reimbursement only.`, false);
+    }
+  }
+  if (has12) {
+    if (!isAdvance) add('E1','Section 12 Math','ERROR','Box 12','Section 12 valid only for Advance','Has values but not marked Advance.',false);
+    if (a12a!==null && a12b!==null && a12c!==null) {
+      const exp = a12a-a12b;
+      add('E2','Section 12 Math','ERROR','12c','12c = 12a − 12b',
+        approxEqual(exp,a12c) ? `${fmt(a12a)} − ${fmt(a12b)} = ${fmt(exp)} ✓`
+          : `Expected ${fmt(exp)}, form shows ${fmt(a12c)}.`,
+        approxEqual(exp,a12c)===true);
+    }
+    if (a12c!==null && a12c<0) add('E3','Section 12 Math','ERROR','12c','12c is not negative',`${fmt(a12c)} — invalid.`,false);
+  }
+
+  if (isFinal && a11h!==null && a11h===0 && has11)
+    add('F1','Advisory','WARN','1b / 11h','Final payment with $0 previously received','Confirm this is first and final request.',null);
+  if (a11f!==null && a11f>0)
+    add('F2','Advisory','INFO','11f','Cost share present',`${fmt(a11f)} recorded. Confirm match requirement met.`,null);
+  if (isAdvance && has12)
+    add('F3','Advisory','INFO','Box 12','Section 12 used','Confirm federal grantor authorized use of Section 12.',null);
+
+  return checks;
+}
+
+function validateReasonableness(d, rb) {
+  const checks = [];
+  function add(id, severity, box, title, detail, pass) {
+    checks.push({ id, category:'Reasonableness', severity, box, title, detail, pass });
+  }
+
+  const n = v => parseFloat(v) || 0;
+  const awardTotal   = n(rb.awardTotal);
+  const pctComplete  = n(rb.pctComplete);
+  const pctRemaining = n(rb.pctRemaining);
+
+  const a11h = parseMoney(d.row_h_1 || d.row_h_T) || 0;
+  const a11i = parseMoney(d.row_i_1 || d.row_i_T) || 0;
+  const a11a = parseMoney(d.row_a_1 || d.row_a_T) || 0;
+  const cumulative = a11h + a11i;
+
+  // ── Award total checks ──
+  if (awardTotal > 0) {
+    // Request does not exceed award
+    add('R1','ERROR','11i vs Award',
+      'Amount requested does not exceed total award',
+      a11i <= awardTotal
+        ? `Request ${fmt(a11i)} is within award total ${fmt(awardTotal)} ✓`
+        : `Request ${fmt(a11i)} EXCEEDS total award of ${fmt(awardTotal)}. This is not allowable.`,
+      a11i <= awardTotal);
+
+    // Cumulative does not exceed award
+    add('R2','ERROR','11h+11i vs Award',
+      'Cumulative federal funds do not exceed total award',
+      cumulative <= awardTotal
+        ? `Cumulative total ${fmt(cumulative)} (prior ${fmt(a11h)} + request ${fmt(a11i)}) is within award ${fmt(awardTotal)} ✓`
+        : `Cumulative total ${fmt(cumulative)} EXCEEDS total award of ${fmt(awardTotal)} by ${fmt(cumulative - awardTotal)}. Overpayment risk.`,
+      cumulative <= awardTotal);
+
+    // Remaining balance after this request
+    const remaining = awardTotal - cumulative;
+    add('R3','INFO','Balance',
+      'Remaining award balance after this request',
+      `${fmt(remaining)} (${awardTotal>0?Math.round((remaining/awardTotal)*100):0}% of award) will remain available after this payment.`,
+      null);
+
+    // Burn rate — what % of award has been spent vs what % has been requested
+    const pctRequested = awardTotal > 0 ? Math.round((cumulative/awardTotal)*100) : 0;
+    if (pctComplete > 0) {
+      const diff = Math.abs(pctComplete - pctRequested);
+      const reasonable = diff <= 25;
+      add('R4', reasonable?'INFO':'WARN', 'Burn Rate',
+        'Funds requested aligns with project completion',
+        reasonable
+          ? `Project ${pctComplete}% complete, ${pctRequested}% of award funds requested — within reasonable range ✓`
+          : `Project ${pctComplete}% complete but ${pctRequested}% of award funds ${pctRequested>pctComplete?'already requested — possible over-draw':'requested — possible underspending'}. Difference of ${diff}% warrants review.`,
+        reasonable ? null : false);
+    }
+
+    // Large single request flag
+    if (awardTotal > 0 && a11i > awardTotal * 0.5) {
+      add('R5','WARN','11i vs Award',
+        'Single request exceeds 50% of total award',
+        `This request (${fmt(a11i)}) is ${Math.round((a11i/awardTotal)*100)}% of the total award (${fmt(awardTotal)}). Verify this is expected and authorized.`,
+        false);
+    }
+  }
+
+  // ── % Complete vs % Remaining consistency ──
+  if (pctComplete > 0 && pctRemaining > 0) {
+    const sum = pctComplete + pctRemaining;
+    const consistent = sum <= 105; // allow small rounding
+    add('R6', consistent?'INFO':'WARN', 'Activity %',
+      'Project completion and remaining activities are consistent',
+      consistent
+        ? `${pctComplete}% complete + ${pctRemaining}% remaining activities — consistent ✓`
+        : `${pctComplete}% complete + ${pctRemaining}% remaining = ${sum}% — this adds up to more than 100%. Review your estimates.`,
+      consistent ? null : false);
+  }
+
+  // ── Final payment + activities remaining ──
+  const isFinal = d.final_cb === true;
+  if (isFinal && pctRemaining > 0) {
+    const concern = pctRemaining > 10;
+    add('R7', concern?'WARN':'INFO', 'Final vs Remaining',
+      'Final payment matches project completion',
+      concern
+        ? `This is marked FINAL but ${pctRemaining}% of project activities reportedly remain. Verify all activities will be completed and all costs accounted for before submitting as final.`
+        : `Final payment with only ${pctRemaining}% of activities remaining — reasonable ✓`,
+      concern ? false : null);
+  }
+
+  // ── % complete sanity ──
+  if (pctComplete > 100) {
+    add('R8','ERROR','% Complete','Project completion cannot exceed 100%',
+      `${pctComplete}% is not a valid completion percentage.`, false);
+  }
+  if (pctRemaining > 100) {
+    add('R9','ERROR','% Remaining','Remaining activities cannot exceed 100%',
+      `${pctRemaining}% is not valid.`, false);
+  }
+
+  return checks;
+}
+
+function scoreReport(checks) {
+  const errors  = checks.filter(c => c.severity==='ERROR' && c.pass===false);
+  const warns   = checks.filter(c => c.severity==='WARN'  && c.pass===false);
+  const passed  = checks.filter(c => c.pass===true);
+  const total   = checks.filter(c => c.pass!==null).length;
+  const score   = total>0 ? Math.round((passed.length/total)*100) : 0;
+  return { errors, warns, passed, total, score };
+}
+
+// ── UI Atoms ──────────────────────────────────────────────────────────────────
+function Spinner({ label }) {
+  return (
+    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:12 }}>
+      <div style={{ width:36, height:36, border:`3px solid ${C.border}`, borderTopColor:C.mid, borderRadius:'50%', animation:'spin 0.8s linear infinite' }} />
+      {label && <div style={{ fontSize:13, color:C.mid, fontWeight:600 }}>{label}</div>}
+    </div>
+  );
+}
+
+function SeverityBadge({ severity, pass }) {
+  if (pass===null) return <span style={{ fontSize:10, fontWeight:700, padding:'2px 7px', borderRadius:10, background:C.infoBg, color:C.info, border:`1px solid ${C.infoBd}` }}>INFO</span>;
+  if (pass===true) return <span style={{ fontSize:10, fontWeight:700, padding:'2px 7px', borderRadius:10, background:C.okBg, color:C.ok, border:`1px solid ${C.okBd}` }}>PASS</span>;
+  if (severity==='ERROR') return <span style={{ fontSize:10, fontWeight:700, padding:'2px 7px', borderRadius:10, background:C.errorBg, color:C.error, border:`1px solid ${C.errorBd}` }}>ERROR</span>;
+  return <span style={{ fontSize:10, fontWeight:700, padding:'2px 7px', borderRadius:10, background:C.warnBg, color:C.warn, border:`1px solid ${C.warnBd}` }}>WARN</span>;
+}
+
+function CheckItem({ check }) {
+  const bg = check.pass===true ? C.okBg : check.pass===null ? C.infoBg : check.severity==='ERROR' ? C.errorBg : C.warnBg;
+  const bd = check.pass===true ? C.okBd : check.pass===null ? C.infoBd : check.severity==='ERROR' ? C.errorBd : C.warnBd;
+  return (
+    <div style={{ padding:'11px 14px', borderRadius:7, border:`1px solid ${bd}`, background:bg, marginBottom:8 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:10 }}>
+        <div style={{ flex:1 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+            <SeverityBadge severity={check.severity} pass={check.pass} />
+            <span className="mono" style={{ fontSize:10, fontWeight:600, color:C.mid }}>{check.box}</span>
+          </div>
+          <div style={{ fontSize:13, fontWeight:600, color:C.ink, marginBottom:3 }}>{check.title}</div>
+          <div style={{ fontSize:12, color:C.muted, lineHeight:1.5 }}>{check.detail}</div>
+        </div>
+        <div style={{ fontSize:18, flexShrink:0 }}>
+          {check.pass===true ? '✓' : check.pass===null ? 'ℹ' : check.severity==='ERROR' ? '✕' : '⚠'}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CategorySection({ title, checks, defaultOpen }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const errors  = checks.filter(c => c.pass===false && c.severity==='ERROR').length;
+  const warns   = checks.filter(c => c.pass===false && c.severity==='WARN').length;
+  const passed  = checks.filter(c => c.pass===true).length;
+  return (
+    <div style={{ background:C.white, borderRadius:10, marginBottom:12, overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.06)' }}>
+      <button className="expand-btn" onClick={() => setOpen(o=>!o)}
+        style={{ width:'100%', padding:'14px 18px', border:'none', background:'transparent', cursor:'pointer',
+          display:'flex', justifyContent:'space-between', alignItems:'center',
+          borderBottom: open ? `1px solid ${C.border}` : 'none' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+          <span style={{ fontSize:13, fontWeight:700, color:C.navy }}>{title}</span>
+          <div style={{ display:'flex', gap:6 }}>
+            {errors>0 && <span style={{ fontSize:11, fontWeight:700, color:C.error, background:C.errorBg, padding:'2px 7px', borderRadius:10 }}>{errors} error{errors>1?'s':''}</span>}
+            {warns>0  && <span style={{ fontSize:11, fontWeight:700, color:C.warn,  background:C.warnBg,  padding:'2px 7px', borderRadius:10 }}>{warns} warn{warns>1?'s':''}</span>}
+            {errors===0 && warns===0 && passed>0 && <span style={{ fontSize:11, fontWeight:700, color:C.ok, background:C.okBg, padding:'2px 7px', borderRadius:10 }}>All clear</span>}
+          </div>
+        </div>
+        <span style={{ color:C.muted, fontSize:14 }}>{open ? '▲' : '▼'}</span>
+      </button>
+      {open && <div style={{ padding:'14px 18px' }}>{checks.map(c => <CheckItem key={c.id} check={c} />)}</div>}
+    </div>
+  );
+}
+
+function ScoreRing({ score, errors, warns }) {
+  const r = 45, circ = 2*Math.PI*r;
+  const offset = circ - (score/100)*circ;
+  const color  = errors>0 ? C.error : warns>0 ? C.warn : C.ok;
+  return (
+    <div style={{ display:'flex', flexDirection:'column', alignItems:'center' }}>
+      <svg width="120" height="120" style={{ transform:'rotate(-90deg)' }}>
+        <circle cx="60" cy="60" r={r} fill="none" stroke={C.border} strokeWidth="8" />
+        <circle cx="60" cy="60" r={r} fill="none" stroke={color} strokeWidth="8"
+          strokeLinecap="round" strokeDasharray={circ}
+          className="ring-circle" style={{ '--target-offset': offset }} />
+      </svg>
+      <div style={{ marginTop:-90, marginBottom:70, textAlign:'center', zIndex:1 }}>
+        <div style={{ fontSize:28, fontWeight:800, color, lineHeight:1 }}>{score}</div>
+        <div style={{ fontSize:11, fontWeight:600, color:C.muted, letterSpacing:'0.06em' }}>SCORE</div>
+      </div>
+    </div>
+  );
+}
+
+// ── OCR Review Screen ─────────────────────────────────────────────────────────
+function OCRReviewScreen({ filename, arrayBuffer, onConfirm, onBack }) {
+  const [page,       setPage]       = useState(1);
+  const [totalPages, setTotalPages] = useState(2);
+  const [ocrStatus,  setOcrStatus]  = useState('rendering'); // rendering|ocring|done
+  const [ocrPct,     setOcrPct]     = useState(0);
+  const [fields,     setFields]     = useState({});
+  const [uncertain,  setUncertain]  = useState({});
+  const canvasRef = useRef();
+
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      setOcrStatus('rendering');
+      const n = await renderPageToCanvas(arrayBuffer, page, canvasRef.current, 1.8);
+      if (!cancelled) setTotalPages(n);
+      if (cancelled) return;
+
+      setOcrStatus('ocring');
+      setOcrPct(0);
+      const data = await ocrCanvas(canvasRef.current, pct => {
+        if (!cancelled) setOcrPct(pct);
+      });
+      if (cancelled) return;
+
+      const parsed  = parseOCRToFields(data.text, page);
+      // Mark uncertain fields (confidence < 70%)
+      const unc = {};
+      data.words?.forEach(w => { if (w.confidence < 70) unc['_ocr_low'] = true; });
+
+      setFields(prev => ({ ...prev, ...parsed }));
+      setUncertain(unc);
+      setOcrStatus('done');
+    }
+    run();
+    return () => { cancelled = true; };
+  }, [page, arrayBuffer]);
+
+  const pageFields = FIELD_PAGES[page] || [];
+
+  function setField(key, val) {
+    setFields(prev => ({ ...prev, [key]: val }));
+  }
+
+  return (
+    <div style={{ height:'100vh', display:'flex', flexDirection:'column', background:C.bg }}>
+      {/* Top bar */}
+      <div style={{ background:C.navy, padding:'12px 20px', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0 }}>
+        <div>
+          <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.12em', color:C.sky, textTransform:'uppercase' }}>eJoe · SF-270 Validator · OCR Review</div>
+          <div className="mono" style={{ fontSize:12, color:'rgba(255,255,255,0.5)', marginTop:2 }}>{filename}</div>
+        </div>
+        <div style={{ display:'flex', gap:10, alignItems:'center' }}>
+          <button onClick={onBack}
+            style={{ padding:'7px 14px', background:'rgba(255,255,255,0.1)', border:'1px solid rgba(255,255,255,0.2)', borderRadius:6, color:C.sky, fontSize:12, cursor:'pointer' }}>
+            ← Back
+          </button>
+          <button onClick={() => onConfirm(fields)}
+            style={{ padding:'7px 16px', background:C.ok, border:'none', borderRadius:6, color:C.white, fontSize:13, fontWeight:700, cursor:'pointer' }}>
+            Confirm & Validate →
+          </button>
+        </div>
+      </div>
+
+      {/* Page tabs */}
+      <div style={{ background:C.white, borderBottom:`1px solid ${C.border}`, padding:'0 20px', display:'flex', gap:4, flexShrink:0 }}>
+        {Array.from({length:totalPages},(_,i)=>i+1).map(p => (
+          <button key={p} onClick={() => setPage(p)}
+            style={{ padding:'10px 18px', border:'none', borderBottom:`3px solid ${page===p ? C.mid : 'transparent'}`,
+              background:'transparent', fontSize:13, fontWeight:page===p?700:400,
+              color:page===p ? C.navy : C.muted, cursor:'pointer', transition:'all .15s' }}>
+            Page {p}
+          </button>
+        ))}
+        <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', padding:'0 4px' }}>
+          {ocrStatus === 'rendering' && <Spinner label="Rendering..." />}
+          {ocrStatus === 'ocring'    && <div style={{ fontSize:12, color:C.mid, fontWeight:600 }}>OCR {ocrPct}%
+            <div style={{ width:120, height:4, background:C.border, borderRadius:2, marginTop:4 }}>
+              <div style={{ width:`${ocrPct}%`, height:'100%', background:C.mid, borderRadius:2, transition:'width .2s' }} />
+            </div>
+          </div>}
+          {ocrStatus === 'done' && <span style={{ fontSize:12, color:C.ok, fontWeight:600 }}>✓ OCR complete — review below</span>}
+        </div>
+      </div>
+
+      {/* Split view */}
+      <div style={{ flex:1, display:'grid', gridTemplateColumns:'1fr 1fr', overflow:'hidden' }}>
+        {/* Left: PDF canvas */}
+        <div style={{ overflowY:'auto', background:'#2a2a2a', display:'flex', justifyContent:'center', padding:16 }}>
+          <canvas ref={canvasRef} style={{ maxWidth:'100%', borderRadius:4, boxShadow:'0 4px 20px rgba(0,0,0,0.4)' }} />
+        </div>
+
+        {/* Right: fields */}
+        <div style={{ overflowY:'auto', padding:'16px 20px' }}>
+          <div style={{ fontSize:11, fontWeight:700, color:C.muted, letterSpacing:'0.08em', textTransform:'uppercase', marginBottom:14 }}>
+            OCR Extracted Fields — Page {page} · Review & Correct
+          </div>
+
+          {ocrStatus !== 'done' ? (
+            <div style={{ display:'flex', justifyContent:'center', paddingTop:60 }}>
+              <Spinner label={ocrStatus==='rendering' ? 'Rendering PDF page…' : `Running OCR… ${ocrPct}%`} />
+            </div>
+          ) : (
+            pageFields.map(f => (
+              <div key={f.key} style={{ marginBottom:12 }}>
+                <div style={{ fontSize:11, fontWeight:600, color:C.ink, marginBottom:4 }}>{f.label}</div>
+                {f.type === 'check' ? (
+                  <div onClick={() => setField(f.key, !fields[f.key])}
+                    style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', userSelect:'none' }}>
+                    <div style={{
+                      width:18, height:18, borderRadius:3, flexShrink:0,
+                      border:`2px solid ${fields[f.key] ? C.mid : C.border}`,
+                      background:fields[f.key] ? C.mid : C.white,
+                      display:'flex', alignItems:'center', justifyContent:'center',
+                    }}>
+                      {fields[f.key] && <span style={{ color:C.white, fontSize:11, fontWeight:700 }}>✓</span>}
+                    </div>
+                    <span style={{ fontSize:13, color:C.muted }}>{fields[f.key] ? 'Checked' : 'Unchecked'}</span>
+                  </div>
+                ) : (
+                  <input
+                    className={`ocr-field${uncertain[f.key] ? ' uncertain' : ''}`}
+                    value={fields[f.key] || ''}
+                    onChange={e => setField(f.key, e.target.value)}
+                    placeholder={f.type==='money' ? '$0.00' : '—'}
+                    style={{
+                      width:'100%', padding:'7px 10px', fontSize:13,
+                      border:`1.5px solid ${C.border}`, borderRadius:6,
+                      background:C.white, fontFamily:'inherit',
+                      transition:'border-color .15s',
+                    }}
+                  />
+                )}
+              </div>
+            ))
+          )}
+
+          {ocrStatus === 'done' && (
+            <div style={{ marginTop:16, padding:'10px 14px', background:C.warnBg, border:`1px solid ${C.warnBd}`, borderRadius:8, fontSize:12, color:'#92400E', lineHeight:1.6 }}>
+              ⚠ OCR accuracy varies with print quality and handwriting. Review every field carefully before validating. Handwritten values may require manual correction.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Reasonableness Screen ─────────────────────────────────────────────────────
+function ReasonablenessScreen({ filename, fields, onContinue, onSkip }) {
+  const [rb, setRb] = useState({ awardTotal:'', pctComplete:'', pctRemaining:'' });
+  const set = key => e => setRb(p => ({ ...p, [key]: e.target.value }));
+
+  const a11i  = parseMoney(fields.row_i_1 || fields.row_i_T) || 0;
+  const a11h  = parseMoney(fields.row_h_1 || fields.row_h_T) || 0;
+  const cumul = a11i + a11h;
+
+  return (
+    <div style={{ minHeight:'100vh', background:C.bg, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:24 }}>
+      <div style={{ width:'100%', maxWidth:520 }}>
+        {/* Header */}
+        <div style={{ marginBottom:24, textAlign:'center' }}>
+          <div style={{ fontSize:11, fontWeight:700, letterSpacing:'0.14em', color:C.mid, textTransform:'uppercase', marginBottom:8 }}>
+            eJoe · SF-270 Validator · v{VERSION}
+          </div>
+          <div style={{ fontSize:22, fontWeight:800, color:C.navy, letterSpacing:'-0.02em', marginBottom:6 }}>
+            Reasonableness Check
+          </div>
+          <div className="mono" style={{ fontSize:12, color:C.muted }}>{filename}</div>
+        </div>
+
+        <div style={{ background:C.white, borderRadius:10, padding:24, boxShadow:'0 2px 12px rgba(0,0,0,0.08)', marginBottom:16 }}>
+          <div style={{ fontSize:13, color:C.muted, lineHeight:1.7, marginBottom:20, padding:'10px 14px', background:C.pale, borderRadius:7, border:`1px solid ${C.border}` }}>
+            These optional questions help assess whether the payment request makes programmatic sense — beyond just the math. Answer what you know and skip the rest.
+          </div>
+
+          {/* Award Total */}
+          <div style={{ marginBottom:18 }}>
+            <label style={{ fontSize:12, fontWeight:600, color:C.ink, display:'block', marginBottom:6 }}>
+              Total Award Amount
+              <span style={{ fontWeight:400, color:C.muted, marginLeft:6 }}>What is the total value of this federal award?</span>
+            </label>
+            <div style={{ position:'relative' }}>
+              <span style={{ position:'absolute', left:11, top:'50%', transform:'translateY(-50%)', color:C.muted, fontSize:13 }}>$</span>
+              <input type="number" step="0.01" min="0" value={rb.awardTotal} onChange={set('awardTotal')}
+                placeholder="0.00"
+                style={{ width:'100%', paddingLeft:22, paddingRight:11, paddingTop:9, paddingBottom:9, fontSize:13, border:`1.5px solid ${C.border}`, borderRadius:6, background:C.white, fontFamily:'ui-monospace,monospace', outline:'none' }}/>
+            </div>
+            {rb.awardTotal && cumul > 0 && (
+              <div style={{ fontSize:11, color:C.muted, marginTop:5 }}>
+                After this request, cumulative drawn: {fmt(cumul)} ({parseFloat(rb.awardTotal)>0?Math.round((cumul/parseFloat(rb.awardTotal))*100):0}% of award)
+              </div>
+            )}
+          </div>
+
+          {/* % Complete */}
+          <div style={{ marginBottom:18 }}>
+            <label style={{ fontSize:12, fontWeight:600, color:C.ink, display:'block', marginBottom:6 }}>
+              Estimated Project Completion
+              <span style={{ fontWeight:400, color:C.muted, marginLeft:6 }}>What % of project activities are complete as of this request?</span>
+            </label>
+            <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+              <input type="number" min="0" max="100" value={rb.pctComplete} onChange={set('pctComplete')}
+                placeholder="e.g. 45"
+                style={{ width:100, padding:'9px 11px', fontSize:14, fontWeight:700, border:`1.5px solid ${C.border}`, borderRadius:6, background:C.white, fontFamily:'ui-monospace,monospace', outline:'none', textAlign:'center' }}/>
+              <span style={{ fontSize:20, color:C.muted }}>%</span>
+              {rb.pctComplete && rb.awardTotal && (
+                <div style={{ fontSize:11, color:C.muted, flex:1 }}>
+                  {Math.abs(parseFloat(rb.pctComplete) - Math.round((cumul/parseFloat(rb.awardTotal))*100))}% gap between project completion and funds requested
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* % Remaining */}
+          <div style={{ marginBottom:8 }}>
+            <label style={{ fontSize:12, fontWeight:600, color:C.ink, display:'block', marginBottom:6 }}>
+              Remaining Project Activities
+              <span style={{ fontWeight:400, color:C.muted, marginLeft:6 }}>After this payment period, what % of project activities will remain?</span>
+            </label>
+            <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+              <input type="number" min="0" max="100" value={rb.pctRemaining} onChange={set('pctRemaining')}
+                placeholder="e.g. 55"
+                style={{ width:100, padding:'9px 11px', fontSize:14, fontWeight:700, border:`1.5px solid ${C.border}`, borderRadius:6, background:C.white, fontFamily:'ui-monospace,monospace', outline:'none', textAlign:'center' }}/>
+              <span style={{ fontSize:20, color:C.muted }}>%</span>
+            </div>
+          </div>
+
+          {rb.pctComplete && rb.pctRemaining && (
+            <div style={{ fontSize:11, color:C.muted, padding:'8px 12px', background:C.pale, borderRadius:6, marginTop:10 }}>
+              {parseFloat(rb.pctComplete) + parseFloat(rb.pctRemaining) > 100
+                ? `⚠ ${parseFloat(rb.pctComplete)}% complete + ${parseFloat(rb.pctRemaining)}% remaining = ${parseFloat(rb.pctComplete)+parseFloat(rb.pctRemaining)}% — adds up to more than 100%, review your estimates.`
+                : `${parseFloat(rb.pctComplete)}% complete + ${parseFloat(rb.pctRemaining)}% remaining — noted.`}
+            </div>
+          )}
+        </div>
+
+        <div style={{ display:'flex', gap:12 }}>
+          <button onClick={() => onContinue(rb)}
+            style={{ flex:1, padding:'12px', background:C.navy, color:C.white, border:'none', borderRadius:8, fontSize:14, fontWeight:700, cursor:'pointer' }}>
+            Run Full Validation →
+          </button>
+          <button onClick={onSkip}
+            style={{ padding:'12px 20px', background:'none', color:C.muted, border:`1px solid ${C.border}`, borderRadius:8, fontSize:13, cursor:'pointer' }}>
+            Skip
+          </button>
+        </div>
+        <div style={{ textAlign:'center', fontSize:11, color:C.muted, marginTop:12, lineHeight:1.6 }}>
+          These checks are advisory only. Results appear alongside technical validation in the report.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Upload Screen ─────────────────────────────────────────────────────────────
+function UploadScreen({ onFillable, onOCR }) {
+  const [dragging,   setDragging]   = useState(false);
+  const [loading,    setLoading]    = useState(false);
+  const [status,     setStatus]     = useState(null); // null | {type, filename, buffer}
+  const [error,      setError]      = useState(null);
+  const inputRef = useRef();
+
+  async function processFile(file) {
+    if (!file || !file.name.endsWith('.pdf')) { setError('Please upload a PDF file.'); return; }
+    setLoading(true); setError(null); setStatus(null);
+    try {
+      const buffer  = await file.arrayBuffer();
+      const detect  = await detectPDFType(buffer);
+
+      if (detect.type === 'fillable' && detect.populated > 0) {
+        // Good fillable PDF — go straight to validation
+        const rawFields = await extractFillableFields(buffer);
+        const fields    = normalizeFields(rawFields);
+        onFillable({ filename: file.name, fields, variant: fields._variant });
+      } else {
+        // Flat, XFA, scanned, or empty — offer OCR
+        setStatus({ type: detect.type, filename: file.name, buffer, detect });
+      }
+    } catch(e) {
+      setError('Could not read PDF: ' + e.message);
+    }
+    setLoading(false);
+  }
+
+  return (
+    <div style={{ minHeight:'100vh', background:C.bg, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:24 }}>
+      <div style={{ textAlign:'center', marginBottom:36 }}>
+        <div style={{ fontSize:11, fontWeight:700, letterSpacing:'0.14em', color:C.mid, textTransform:'uppercase', marginBottom:8 }}>
+          eJoe · SF-270 QC Tool · v{VERSION}
+        </div>
+        <h1 style={{ fontSize:32, fontWeight:800, color:C.navy, letterSpacing:'-0.03em', marginBottom:10 }}>
+          SF-270 Validator
+        </h1>
+        <p style={{ fontSize:15, color:C.muted, maxWidth:440, lineHeight:1.6 }}>
+          Upload any completed SF-270 PDF. Fillable PDFs are read automatically. Scanned, flat, or handwritten forms go through OCR review first.
+        </p>
+      </div>
+
+      {/* Drop zone */}
+      {!status && (
+        <div className="upload-zone"
+          onDragOver={e => { e.preventDefault(); setDragging(true); }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={e => { e.preventDefault(); setDragging(false); processFile(e.dataTransfer.files[0]); }}
+          onClick={() => inputRef.current?.click()}
+          style={{
+            width:'100%', maxWidth:480, padding:'48px 32px', borderRadius:14,
+            border:`2px dashed ${dragging ? C.mid : C.border}`,
+            background: dragging ? C.pale : C.white,
+            cursor:'pointer', textAlign:'center', transition:'all .2s',
+            boxShadow:'0 2px 12px rgba(0,0,0,0.06)',
+          }}>
+          <input ref={inputRef} type="file" accept=".pdf" style={{ display:'none' }}
+            onChange={e => processFile(e.target.files[0])} />
+          {loading ? <Spinner label="Detecting PDF type…" /> : (
+            <>
+              <div style={{ fontSize:40, marginBottom:14 }}>📋</div>
+              <div style={{ fontSize:15, fontWeight:700, color:C.navy, marginBottom:6 }}>Drop SF-270 PDF here</div>
+              <div style={{ fontSize:13, color:C.muted, marginBottom:16 }}>or click to browse</div>
+              <div style={{ display:'flex', gap:12, justifyContent:'center', flexWrap:'wrap' }}>
+                {[['✅','Fillable PDF','Auto-read'],['🔍','Scanned / Flat','OCR review'],['✍️','Handwritten','OCR + manual']].map(([icon,t,s])=>(
+                  <div key={t} style={{ textAlign:'center', padding:'8px 12px', background:C.pale, borderRadius:8, minWidth:90 }}>
+                    <div style={{ fontSize:20, marginBottom:4 }}>{icon}</div>
+                    <div style={{ fontSize:11, fontWeight:700, color:C.navy }}>{t}</div>
+                    <div style={{ fontSize:10, color:C.muted }}>{s}</div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* OCR offer card */}
+      {status && (
+        <div className="fade-in" style={{ width:'100%', maxWidth:480, background:C.white, borderRadius:12, padding:24, boxShadow:'0 4px 20px rgba(0,0,0,0.1)', border:`1.5px solid ${C.warnBd}` }}>
+          <div style={{ fontSize:11, fontWeight:700, color:C.warn, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:8 }}>
+            {status.detect.type === 'xfa'  ? 'XFA Form Detected' :
+             status.detect.type === 'flat' ? 'Flat / Scanned PDF Detected' :
+             'Limited Field Data Detected'}
+          </div>
+          <div style={{ fontSize:14, fontWeight:600, color:C.ink, marginBottom:6 }}>{status.filename}</div>
+          <div style={{ fontSize:13, color:C.muted, lineHeight:1.6, marginBottom:20 }}>
+            {status.detect.type === 'xfa'
+              ? "This is the official grants.gov XFA form, which uses a proprietary format that can't be read directly. Use OCR to extract the visible text."
+              : status.detect.populated === 0
+              ? "This PDF has form fields but none appear to have data. If it was filled by hand or printed, use OCR to extract the content."
+              : "This PDF's fields couldn't be read directly. OCR will scan the visible page content and let you review the results before validating."}
+          </div>
+          <div style={{ display:'flex', gap:10 }}>
+            <button onClick={() => onOCR({ filename:status.filename, arrayBuffer:status.buffer })}
+              style={{ flex:1, padding:'12px', background:C.navy, color:C.white, border:'none', borderRadius:8, fontSize:14, fontWeight:700, cursor:'pointer' }}>
+              🔍 Use OCR →
+            </button>
+            <button onClick={() => setStatus(null)}
+              style={{ padding:'12px 16px', background:'none', color:C.muted, border:`1px solid ${C.border}`, borderRadius:8, fontSize:13, cursor:'pointer' }}>
+              Upload Different File
+            </button>
+          </div>
+          <div style={{ marginTop:12, fontSize:11, color:C.muted, lineHeight:1.5 }}>
+            OCR works best with clearly printed text. Handwritten values and wet signatures will need manual review and correction.
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <div style={{ marginTop:16, padding:'12px 16px', background:C.errorBg, border:`1px solid ${C.errorBd}`, borderRadius:8, maxWidth:480, width:'100%', fontSize:13, color:C.error }}>
+          {error}
+        </div>
+      )}
+
+      <div style={{ marginTop:32, fontSize:11, color:C.muted, textAlign:'center', maxWidth:420, lineHeight:1.6 }}>
+        For educational purposes only. Results do not constitute financial or legal advice.<br />
+        Always verify accuracy before submitting to a federal agency.
+      </div>
+    </div>
+  );
+}
+
+// ── Results Screen ────────────────────────────────────────────────────────────
+function ResultsScreen({ result, onReset }) {
+  const { filename, checks, source } = result;
+  const { errors, warns, passed, total, score } = scoreReport(checks);
+  const categories = ['Required Fields','Date Logic','Payment Type & Basis','Section 11 Math','Section 12 Math','Advisory','Reasonableness'];
+
+  const verdict = errors.length > 0
+    ? { label:'Needs Correction', color:C.error, bg:C.errorBg, bd:C.errorBd, desc:`${errors.length} error${errors.length>1?'s':''} must be resolved before submission.` }
+    : warns.length > 0
+    ? { label:'Review Recommended', color:C.warn, bg:C.warnBg, bd:C.warnBd, desc:`No errors found, but ${warns.length} item${warns.length>1?'s':''} need attention.` }
+    : { label:'Looks Good', color:C.ok, bg:C.okBg, bd:C.okBd, desc:'All checks passed. Review the form carefully before submitting.' };
+
+  function exportReport() {
+    const lines = [
+      'SF-270 Validation Report',`File: ${filename}`,`Source: ${source||'PDF fields'}`,
+      `Date: ${new Date().toLocaleString()}`,`Score: ${score}/100`,`Verdict: ${verdict.label}`,'',
+      'SUMMARY',`Errors: ${errors.length}`,`Warnings: ${warns.length}`,`Passed: ${passed.length} of ${total}`,'',
+      'DETAILED RESULTS','',
+      ...checks.map(c => `[${c.pass===true?'PASS':c.pass===null?'INFO':c.severity}] ${c.box} — ${c.title}\n  ${c.detail}`),
+      '','---','This report is for educational purposes only and does not constitute financial or legal advice.',
+      'The submitter bears sole responsibility for accuracy before submission.',
+    ];
+    const blob = new Blob([lines.join('\n')],{type:'text/plain'});
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href=url; a.download=`SF270_Validation_${new Date().toISOString().slice(0,10)}.txt`; a.click();
+    setTimeout(()=>URL.revokeObjectURL(url),3000);
+  }
+
+  return (
+    <div style={{ minHeight:'100vh', background:C.bg, paddingBottom:60 }}>
+      <div style={{ background:C.navy, padding:'14px 24px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+        <div>
+          <div style={{ fontSize:10, fontWeight:700, letterSpacing:'0.12em', color:C.sky, textTransform:'uppercase' }}>eJoe · SF-270 Validator · v{VERSION}</div>
+          <div className="mono" style={{ fontSize:12, color:'rgba(255,255,255,0.5)', marginTop:2 }}>
+            {filename} {source ? `· via ${source}` : ''} {result.variant ? `· ${result.variant === 'gov97' ? 'SF-270 Rev.7-97' : 'eJoe fillable'}` : ''}
+          </div>
+        </div>
+        <button onClick={onReset} style={{ padding:'8px 16px', background:'rgba(255,255,255,0.1)', border:'1px solid rgba(255,255,255,0.2)', borderRadius:6, color:C.sky, fontSize:12, fontWeight:600, cursor:'pointer' }}>
+          ← Validate Another
+        </button>
+      </div>
+
+      <div style={{ maxWidth:780, margin:'0 auto', padding:'24px 20px' }}>
+        {/* Scorecard */}
+        <div className="fade-in" style={{ background:C.white, borderRadius:12, padding:'24px 28px', boxShadow:'0 2px 16px rgba(0,0,0,0.08)', marginBottom:20, border:`2px solid ${verdict.bd}` }}>
+          <div style={{ display:'flex', alignItems:'center', gap:28, flexWrap:'wrap' }}>
+            <ScoreRing score={score} errors={errors.length} warns={warns.length} />
+            <div style={{ flex:1, minWidth:200 }}>
+              <div style={{ fontSize:11, fontWeight:700, letterSpacing:'0.1em', color:C.muted, textTransform:'uppercase', marginBottom:6 }}>Validation Result</div>
+              <div style={{ fontSize:24, fontWeight:800, color:verdict.color, marginBottom:6 }}>{verdict.label}</div>
+              <div style={{ fontSize:13, color:C.muted, marginBottom:16, lineHeight:1.5 }}>{verdict.desc}</div>
+              <div style={{ display:'flex', gap:16, flexWrap:'wrap' }}>
+                {[['ERRORS',errors.length,C.error],['WARNINGS',warns.length,C.warn],['PASSED',passed.length,C.ok],['TOTAL',total,C.slate]].map(([lbl,val,col])=>(
+                  <div key={lbl} style={{ textAlign:'center' }}>
+                    <div style={{ fontSize:22, fontWeight:800, color:col }}>{val}</div>
+                    <div style={{ fontSize:11, color:C.muted, fontWeight:600 }}>{lbl}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <button onClick={exportReport} style={{ padding:'10px 20px', background:C.navy, color:C.white, border:'none', borderRadius:7, fontSize:13, fontWeight:600, cursor:'pointer', whiteSpace:'nowrap', alignSelf:'flex-start' }}>
+              ↓ Export Report
+            </button>
+          </div>
+        </div>
+
+        {errors.length>0 && (
+          <div className="fade-in" style={{ background:C.errorBg, border:`1px solid ${C.errorBd}`, borderRadius:10, padding:'14px 18px', marginBottom:16 }}>
+            <div style={{ fontSize:12, fontWeight:700, color:C.error, marginBottom:10, textTransform:'uppercase', letterSpacing:'0.06em' }}>{errors.length} Error{errors.length>1?'s':''} Requiring Correction</div>
+            {errors.map(e=>(
+              <div key={e.id} style={{ display:'flex', gap:10, marginBottom:6, fontSize:13 }}>
+                <span className="mono" style={{ color:C.error, fontWeight:600, flexShrink:0 }}>{e.box}</span>
+                <span style={{ color:C.ink }}>{e.title}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {warns.length>0 && (
+          <div className="fade-in" style={{ background:C.warnBg, border:`1px solid ${C.warnBd}`, borderRadius:10, padding:'14px 18px', marginBottom:16 }}>
+            <div style={{ fontSize:12, fontWeight:700, color:C.warn, marginBottom:10, textTransform:'uppercase', letterSpacing:'0.06em' }}>{warns.length} Warning{warns.length>1?'s':''} for Review</div>
+            {warns.map(w=>(
+              <div key={w.id} style={{ display:'flex', gap:10, marginBottom:6, fontSize:13 }}>
+                <span className="mono" style={{ color:C.warn, fontWeight:600, flexShrink:0 }}>{w.box}</span>
+                <span style={{ color:C.ink }}>{w.title}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ fontSize:11, fontWeight:700, letterSpacing:'0.08em', color:C.muted, textTransform:'uppercase', margin:'20px 0 12px' }}>Detailed Results</div>
+
+        {categories.map(cat => {
+          const catChecks = checks.filter(c=>c.category===cat);
+          if (!catChecks.length) return null;
+          return <CategorySection key={cat} title={cat} checks={catChecks} defaultOpen={catChecks.some(c=>c.pass===false&&c.severity==='ERROR')} />;
+        })}
+
+        <div style={{ marginTop:24, padding:'12px 16px', background:C.white, borderRadius:8, border:`1px solid ${C.border}`, fontSize:11, color:C.muted, lineHeight:1.6, textAlign:'center' }}>
+          This report is for educational purposes only and does not constitute financial or legal advice.<br />
+          The submitter bears sole responsibility for accuracy before submission to any federal agency.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Root App ──────────────────────────────────────────────────────────────────
+function App() {
+  const [screen,   setScreen]   = useState('upload'); // upload | reasonableness | ocr | results
+  const [ocrData,  setOcrData]  = useState(null);
+  const [result,   setResult]   = useState(null);
+  const [pendingFields, setPendingFields] = useState(null);
+  const [pendingFilename, setPendingFilename] = useState(null);
+  const [pendingSource, setPendingSource] = useState(null);
+  const [pendingVariant, setPendingVariant] = useState(null);
+
+  function handleFillable({ filename, fields, variant }) {
+    setPendingFields(fields);
+    setPendingFilename(filename);
+    setPendingSource('PDF fields');
+    setPendingVariant(variant);
+    setScreen('reasonableness');
+  }
+
+  function handleOCR(data) {
+    setOcrData(data);
+    setScreen('ocr');
+  }
+
+  function handleOCRConfirm(fields) {
+    const normalized = normalizeFields(fields);
+    setPendingFields(normalized);
+    setPendingFilename(ocrData.filename);
+    setPendingSource('OCR');
+    setPendingVariant(normalized._variant || 'unknown');
+    setScreen('reasonableness');
+  }
+
+  function handleReasonableness(rb) {
+    const checks = [
+      ...validate(pendingFields),
+      ...validateReasonableness(pendingFields, rb),
+    ];
+    setResult({ filename: pendingFilename, checks, source: pendingSource, variant: pendingVariant });
+    setScreen('results');
+  }
+
+  function handleSkipReasonableness() {
+    const checks = validate(pendingFields);
+    setResult({ filename: pendingFilename, checks, source: pendingSource, variant: pendingVariant });
+    setScreen('results');
+  }
+
+  function reset() {
+    setScreen('upload');
+    setOcrData(null);
+    setResult(null);
+    setPendingFields(null);
+    setPendingFilename(null);
+    setPendingSource(null);
+    setPendingVariant(null);
+  }
+
+  if (screen === 'upload') return <UploadScreen onFillable={handleFillable} onOCR={handleOCR} />;
+  if (screen === 'reasonableness') return <ReasonablenessScreen filename={pendingFilename} fields={pendingFields} onContinue={handleReasonableness} onSkip={handleSkipReasonableness} />;
+  if (screen === 'ocr')    return <OCRReviewScreen filename={ocrData.filename} arrayBuffer={ocrData.arrayBuffer} onConfirm={handleOCRConfirm} onBack={reset} />;
+  if (screen === 'results') return <ResultsScreen result={result} onReset={reset} />;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
