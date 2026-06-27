@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>eJoe SF-270 Toolkit</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: #0F1A2E; color: #E8EDF5; min-height: 100vh; }
+
+    /* ── Header ── */
+    .header { padding: 48px 24px 0; text-align: center; max-width: 720px; margin: 0 auto; }
+
+    .logo { font-size: 52px; font-weight: 800; color: #FFFFFF; letter-spacing: -0.04em; line-height: 1; margin-bottom: 8px; }
+    .logo span { color: #4A8FD4; }
+    .tagline { font-size: 15px; color: #7B91B0; line-height: 1.65; max-width: 460px; margin: 0 auto 28px; }
+
+    /* ── Form info panel ── */
+    .form-info {
+      background: rgba(30,48,80,0.6); border: 1px solid #1E3050;
+      border-radius: 10px; padding: 18px 22px; margin: 0 auto 16px; max-width: 580px;
+    }
+    .form-title { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; color: #D0DCF0; letter-spacing: 0.04em; margin-bottom: 3px; }
+    .form-meta  { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #4A6080; margin-bottom: 12px; letter-spacing: 0.06em; }
+    .form-links { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+    .form-link  { font-size: 13px; font-weight: 600; color: #4A8FD4; text-decoration: none; transition: color .15s; }
+    .form-link:hover { color: #7BA3D0; }
+    .form-sep   { color: #2E4460; }
+    .form-notice { font-size: 11px; color: #4A6080; line-height: 1.6; border-top: 1px solid #1E3050; padding-top: 10px; margin-top: 2px; }
+
+    /* ── Adobe notice ── */
+    .adobe-notice {
+      max-width: 580px; margin: 0 auto 36px;
+      padding: 12px 18px; border-radius: 8px;
+      background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.25);
+      font-size: 12px; color: #92702A; line-height: 1.6; text-align: left;
+    }
+    .adobe-notice strong { color: #D97706; }
+
+    /* ── Divider ── */
+    .rule { width: 100%; max-width: 720px; margin: 0 auto; height: 1px; background: linear-gradient(90deg, transparent, #1E3050, transparent); }
+
+    /* ── Tools ── */
+    .tools { max-width: 720px; margin: 0 auto; padding: 40px 20px 56px; display: flex; flex-direction: column; gap: 16px; }
+
+    .tool-card {
+      background: #162035; border: 1px solid #1E3050; border-radius: 12px;
+      padding: 26px 28px 22px; text-decoration: none; color: inherit; display: block;
+      transition: border-color .2s, transform .15s, background .2s; position: relative; overflow: hidden;
+    }
+    .tool-card::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+      background: var(--accent); opacity: 0; transition: opacity .2s;
+    }
+    .tool-card:hover { border-color: var(--accent); background: #1A2640; transform: translateY(-2px); }
+    .tool-card:hover::before { opacity: 1; }
+
+    .tool-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
+    .tool-number { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 500; color: var(--accent); letter-spacing: 0.1em; margin-bottom: 5px; }
+    .tool-name   { font-size: 20px; font-weight: 700; color: #FFFFFF; letter-spacing: -0.02em; line-height: 1.2; }
+    .tool-icon   { font-size: 28px; flex-shrink: 0; opacity: 0.85; }
+    .tool-desc   { font-size: 14px; color: #7B91B0; line-height: 1.65; margin-bottom: 16px; }
+
+    .tool-tags { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+    .tag {
+      font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 20px;
+      background: rgba(255,255,255,0.05); color: #5B7A9E; border: 1px solid #1E3050;
+      font-family: 'JetBrains Mono', monospace; letter-spacing: 0.04em;
+    }
+    .tag.beta {
+      color: #D97706; border-color: rgba(245,158,11,0.3);
+      background: rgba(245,158,11,0.08);
+    }
+    .tool-cta { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--accent); margin-top: 16px; transition: gap .15s; }
+    .tool-card:hover .tool-cta { gap: 10px; }
+
+    /* ── Disclaimer ── */
+    .disclaimer {
+      max-width: 680px; margin: 0 auto 40px; padding: 14px 20px;
+      background: rgba(30,48,80,0.5); border: 1px solid #1E3050; border-radius: 8px;
+      font-size: 12px; color: #4A6080; text-align: center; line-height: 1.6;
+    }
+
+    /* ── Footer ── */
+    .footer { text-align: center; padding: 0 24px 48px; font-size: 11px; color: #2E4460; line-height: 1.8; }
+    .footer a { color: #3D5A80; text-decoration: none; }
+    .footer a:hover { color: #5B8DBE; }
+
+    /* ── Bot animations ── */
+    .arm-l-idx { transform-origin: 44px 105px; animation: waveL 1.8s ease-in-out infinite; }
+    .arm-r-idx { transform-origin: 96px 105px; animation: waveR 1.8s ease-in-out infinite; }
+    @keyframes waveL { 0%,100%{transform:rotate(0deg)} 25%{transform:rotate(-28deg)} 75%{transform:rotate(-10deg)} }
+    @keyframes waveR { 0%,100%{transform:rotate(0deg)} 25%{transform:rotate(28deg)}  75%{transform:rotate(10deg)} }
+    .eye-bl { transform-origin: 52px 69px; animation: blink1 3.5s ease-in-out infinite; }
+    .eye-br { transform-origin: 88px 69px; animation: blink2 3.5s ease-in-out infinite; }
+    @keyframes blink1 { 0%,88%,100%{transform:scaleY(1)} 93%{transform:scaleY(0.06)} }
+    @keyframes blink2 { 0%,90%,100%{transform:scaleY(1)} 95%{transform:scaleY(0.06)} }
+    .mouth-idx { animation: talk 2.2s step-end infinite; }
+    @keyframes talk { 0%,100%{opacity:1} 20%{opacity:0.2} 45%{opacity:1} 65%{opacity:0.4} }
+    .hat-idx { transform-origin: 70px 28px; animation: bob 3s ease-in-out infinite; }
+    @keyframes bob { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-3px)} }
+    .star-idx { transform-origin: 70px 20px; animation: spin 6s linear infinite; }
+    @keyframes spin { to{transform:rotate(360deg)} }
+    .pulse-idx { animation: pul 2s ease-in-out infinite; }
+    @keyframes pul { 0%,100%{opacity:.4} 50%{opacity:1} }
+
+    @media (max-width: 540px) {
+      .logo { font-size: 32px; }
+      .tool-card { padding: 20px 18px 18px; }
+      .tool-name { font-size: 17px; }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="header">
+
+    <div class="logo">e<span>Joe</span></div>
+    <p class="tagline">
+      A free browser-based toolkit to help grant recipients understand,
+      prepare, and review SF-270 payment requests. No login. No install. Runs entirely in your browser.
+    </p>
+
+    <div class="form-info">
+      <div class="form-title">SF-270 · Request for Advance or Reimbursement</div>
+      <div class="form-meta">OMB Control No. 4040-0012 · Expiration 06/30/2028</div>
+      <div class="form-links">
+        <a href="SF270_fillable-Copy.pdf" class="form-link" download>↓ Download our fillable SF-270 PDF</a>
+        <span class="form-sep">·</span>
+        <a href="https://www.grants.gov/forms/post-award-reporting-forms" class="form-link" target="_blank" rel="noopener">Check grants.gov for the current version ↗</a>
+      </div>
+      <div class="form-notice">⚠ Always verify you are using the most current version of this form approved by OMB. Current approved version: OMB Control No. 4040-0012 · Expiration 06/30/2028.</div>
+    </div>
+
+  </header>
+
+  <div class="rule"></div>
+
+  <div class="tools">
+
+    <!-- Tool 1: Wizard / Bot -->
+    <a href="wizard.html" class="tool-card" style="--accent: #3B82F6;">
+      <div class="tool-header">
+        <div>
+          <div class="tool-number">TOOL 01</div>
+          <div class="tool-name">eJoe SF-270 Bot</div>
+        </div>
+        <div class="tool-icon">🤖</div>
+      </div>
+      <p class="tool-desc">
+        Meet eJoe — a retro terminal bot who turns learning the SF-270 into
+        an interactive game. New to payment requests? eJoe guides you through
+        every concept in plain language, one question at a time, explaining
+        what each field means and why it matters. Fun, educational, and
+        surprisingly useful. Your answers generate a completed SF-270 PDF at the end.
+      </p>
+      <div class="tool-tags">
+        <span class="tag">🎮 game</span>
+        <span class="tag">guided</span>
+        <span class="tag">plain language</span>
+        <span class="tag">educational</span>
+        <span class="tag">PDF export</span>
+      </div>
+      <div class="tool-cta">Play the game →</div>
+    </a>
+
+    <!-- Tool 2: Form Builder -->
+    <a href="helper.html" class="tool-card" style="--accent: #10B981;">
+      <div class="tool-header">
+        <div>
+          <div class="tool-number">TOOL 02</div>
+          <div class="tool-name">SF-270 Form Builder</div>
+        </div>
+        <div class="tool-icon">📋</div>
+      </div>
+      <p class="tool-desc">
+        For those already familiar with the SF-270 who just need a clean,
+        structured interface to fill it out efficiently. Enter your financial
+        data in plain terms — the builder maps it to the correct form fields,
+        auto-calculates Sections 11 and 12, and exports a completed PDF ready
+        for review. All sections visible and independently editable at once.
+      </p>
+      <div class="tool-tags">
+        <span class="tag">form builder</span>
+        <span class="tag">auto-calculate</span>
+        <span class="tag">PDF export</span>
+        <span class="tag">Section 11 & 12</span>
+        <span class="tag">experienced users</span>
+      </div>
+      <div class="tool-cta">Open form builder →</div>
+    </a>
+
+    <!-- Tool 3: Validator -->
+    <a href="validator.html" class="tool-card" style="--accent: #F59E0B;">
+      <div class="tool-header">
+        <div>
+          <div class="tool-number">TOOL 03</div>
+          <div class="tool-name">SF-270 Validator</div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0">
+          <div class="tool-icon">🔍</div>
+          <span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(245,158,11,0.12);color:#D97706;border:1px solid rgba(245,158,11,0.3);font-family:'JetBrains Mono',monospace;letter-spacing:0.08em">BETA</span>
+        </div>
+      </div>
+      <p class="tool-desc">
+        Upload a completed SF-270 PDF for quality control review. The validator
+        checks required fields, date logic, payment type accuracy, Section 11
+        and 12 math, and performs a reasonableness check against award totals
+        and project completion. Supports fillable PDFs (including our format and
+        the standard GSA Rev. 7-97 form) and scanned or handwritten forms via OCR.
+      </p>
+      <div class="tool-tags">
+        <span class="tag beta">⚠ beta</span>
+        <span class="tag">QC validation</span>
+        <span class="tag">math checks</span>
+        <span class="tag">reasonableness</span>
+        <span class="tag">OCR support</span>
+        <span class="tag">multi-format</span>
+      </div>
+      <div class="tool-cta">Open validator →</div>
+    </a>
+
+  </div>
+
+  <div class="disclaimer">
+    These tools are for <strong>educational purposes only</strong> and do not constitute financial,
+    legal, or accounting advice. The submitter bears sole responsibility for the accuracy
+    of all information submitted to federal agencies.
+    <br />Not affiliated with or endorsed by any federal agency or the Office of Management and Budget.
+  </div>
+
+  <div class="adobe-notice" style="max-width:680px;margin:0 auto 24px;">
+    <strong>📋 Note on grants.gov forms:</strong> The SF-270 available directly from grants.gov uses Adobe's proprietary XFA format and requires Adobe Reader 8 or higher to open. It is not compatible with standard PDF readers or browsers. You are not required to use that version — any current OMB-approved version of the SF-270 is acceptable. Always confirm the approved version with your federal agency before submitting.
+  </div>
+
+  <footer class="footer">
+    eJoe SF-270 Toolkit &nbsp;·&nbsp; OMB 4040-0012 &nbsp;·&nbsp; Exp. 06/30/2028<br />
+    <a href="README.md">Disclaimer & Terms</a>
+  </footer>
+
+</body>
+</html>
